@@ -1,0 +1,18 @@
+{
+  "name": "LIBER ❤️ — El Semáforo del Amor",
+  "short_name": "LIBER ❤️",
+  "description": "Juego romántico y respetuoso para que parejas adultas comuniquen su estado de ánimo, cariño e intimidad.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fff5f8",
+  "theme_color": "#ff4d79",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

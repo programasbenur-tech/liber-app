@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+:root {
+  --background: #fff5f8;
+  --foreground: #2d1635;
+}
+
+body {
+  background: linear-gradient(160deg, #fff5f8 0%, #fdf2f8 45%, #f5f3ff 100%);
+  color: var(--foreground);
+  font-family: var(--font-jakarta), system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+}
+
+@keyframes floatHeart {
+  0% {
+    transform: translateY(0) scale(0.9) rotate(0deg);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.45;
+  }
+  80% {
+    opacity: 0.35;
+  }
+  100% {
+    transform: translateY(-110vh) scale(1.15) rotate(12deg);
+    opacity: 0;
+  }
+}
+
+.animate-float-heart {
+  animation: floatHeart var(--float-duration, 14s) linear infinite;
+  animation-delay: var(--float-delay, 0s);
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.95;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2.4s ease-in-out infinite;
+}
