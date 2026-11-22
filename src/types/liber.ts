@@ -88,8 +88,11 @@ export interface MoodCheckin {
   createdAt: string;
 }
 
+export type PartnerPresenceStatus = 'waiting' | 'online' | 'recent' | 'simulated';
+
 export interface AffectionMessage {
   id: string;
+  senderSlotId?: string;
   senderName: string;
   emoji: string;
   text: string;
@@ -104,6 +107,13 @@ export interface CoupleState {
   partnerName: string;
   partnerAvatar: string;
   partnerLatestCheckin: MoodCheckin | null;
+  myDisplayName?: string;
+  myAvatar?: string;
+  myChatEnabled?: boolean;
+  partnerChatEnabled?: boolean;
+  partnerStatus?: PartnerPresenceStatus;
+  partnerLastSeenAt?: number | null;
+  isSimulatedPartner?: boolean;
 }
 
 export interface RomanticIdea {

@@ -10,5 +10,8 @@
   },
   "observability": {
     "enabled": true
+  },
+  "vars": {
+    "NEXT_PUBLIC_SUPABASE_URL": "https://gcqpxhhyaduplgosevrf.supabase.co"
   }
 }

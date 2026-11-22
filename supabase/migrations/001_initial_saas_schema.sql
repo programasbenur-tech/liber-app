@@ -5,20 +5,6 @@
 
 create extension if not exists "pgcrypto";
 
--- Helper function: check admin role safely via JWT/profile
-create or replace function public.is_admin()
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1 from public.profiles
-    where id = auth.uid() and role = 'admin'
-  );
-$$;
-
 -- ----------------------------------------------------------------------------
 -- 1. PROFILES
 -- ----------------------------------------------------------------------------
@@ -45,6 +31,20 @@ create policy "profiles_update_own" on public.profiles
 
 create policy "profiles_delete_own" on public.profiles
   for delete using (auth.uid() = id);
+
+-- Helper function: check admin role safely via JWT/profile (defined after profiles exists)
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'admin'
+  );
+$$;
 
 -- ----------------------------------------------------------------------------
 -- 2. USER PREFERENCES

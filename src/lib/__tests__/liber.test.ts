@@ -12,6 +12,12 @@ import {
   TRUST_DIMENSIONS_ORDER,
 } from '../fidelityScoring.ts';
 import {
+  canCoupleChat,
+  computePartnerPresence,
+  normalizeRoomMessages,
+  sanitizeSharedCheckin,
+} from '../roomPresence.ts';
+import {
   arePaymentsEnabled,
   getCurrencyForCountry,
   mercadoPagoProvider,
@@ -219,4 +225,102 @@ test('evaluateTrustLabAnswers computes accurate per-dimension scores, strongest 
     result.strongestDimension === 'walls_windows' ||
       result.strongestDimension === 'attunement_repair'
   );
+});
+
+test('computePartnerPresence accurately classifies waiting, online, and recent heartbeats', () => {
+  const now = 1_700_000_000_000;
+  assert.equal(computePartnerPresence(null, now), 'waiting');
+  assert.equal(computePartnerPresence(undefined, now), 'waiting');
+  assert.equal(computePartnerPresence(now - 5_000, now), 'online');
+  assert.equal(computePartnerPresence(now - 15_000, now), 'online');
+  assert.equal(computePartnerPresence(now - 15_001, now), 'recent');
+});
+
+test('canCoupleChat enforces mutual voluntary opt-in and connection requirement', () => {
+  assert.equal(
+    canCoupleChat({ myChatEnabled: true, partnerChatEnabled: true, partnerStatus: 'waiting' }),
+    false
+  );
+  assert.equal(
+    canCoupleChat({ myChatEnabled: false, partnerChatEnabled: true, partnerStatus: 'online' }),
+    false
+  );
+  assert.equal(
+    canCoupleChat({ myChatEnabled: true, partnerChatEnabled: false, partnerStatus: 'online' }),
+    false
+  );
+  assert.equal(
+    canCoupleChat({ myChatEnabled: true, partnerChatEnabled: true, partnerStatus: 'online' }),
+    true
+  );
+  assert.equal(
+    canCoupleChat({ myChatEnabled: true, partnerChatEnabled: false, partnerStatus: 'simulated' }),
+    true
+  );
+});
+
+test('normalizeRoomMessages sorts chronologically and sets isFromMe accurately via senderSlotId', () => {
+  const normalized = normalizeRoomMessages(
+    [
+      {
+        id: 'm2',
+        senderSlotId: 'slot_partner',
+        senderName: 'Ana',
+        emoji: '💖',
+        text: 'Segundo mensaje',
+        createdAt: '2026-11-22T12:05:00.000Z',
+        isFromMe: false,
+      },
+      {
+        id: 'm1',
+        senderSlotId: 'slot_me',
+        senderName: 'Juan',
+        emoji: '🫂',
+        text: 'Primer mensaje',
+        createdAt: '2026-11-22T12:00:00.000Z',
+        isFromMe: false,
+      },
+    ],
+    'slot_me'
+  );
+
+  assert.equal(normalized[0].id, 'm1');
+  assert.equal(normalized[0].isFromMe, true);
+  assert.equal(normalized[1].id, 'm2');
+  assert.equal(normalized[1].isFromMe, false);
+});
+
+test('sanitizeSharedCheckin enforces mood and affection sharing permissions', () => {
+  const base: MoodCheckin = {
+    id: 'c1',
+    userId: 'u1',
+    score: 80,
+    computedState: 'LIBER',
+    finalState: 'LIBER',
+    manualOverride: false,
+    boundaryLock: 'NONE',
+    shareMoodState: false,
+    shareAffectionPrefs: true,
+    shareEnergyLevel: false,
+    affectionPrefs: ['cuddles', 'kisses'],
+    createdAt: '2026-11-22T12:00:00.000Z',
+  };
+
+  assert.equal(sanitizeSharedCheckin(null), null);
+  assert.equal(sanitizeSharedCheckin(base), null);
+
+  const moodOnly = sanitizeSharedCheckin({
+    ...base,
+    shareMoodState: true,
+    shareAffectionPrefs: false,
+  });
+  assert.ok(moodOnly !== null);
+  assert.deepEqual(moodOnly.affectionPrefs, []);
+
+  const fullShared = sanitizeSharedCheckin({
+    ...base,
+    shareMoodState: true,
+    shareAffectionPrefs: true,
+  });
+  assert.deepEqual(fullShared?.affectionPrefs, ['cuddles', 'kisses']);
 });

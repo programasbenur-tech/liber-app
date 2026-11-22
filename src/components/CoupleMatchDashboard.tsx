@@ -1,10 +1,22 @@
 'use client';
 
-import { useState } from 'react';
-import { Copy, Check, Heart, Lock, Send, Users, History, Share2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Copy,
+  Check,
+  Heart,
+  Lock,
+  Send,
+  Users,
+  History,
+  Share2,
+  RefreshCw,
+  MessageCircleHeart,
+} from 'lucide-react';
 import { VIRTUAL_AFFECTION_MESSAGES } from '@/data/ideas';
 import { AFFECTION_TAG_LABELS, TRAFFIC_STATE_META } from '@/i18n/translations';
 import { computeCoupleMatch } from '@/lib/match';
+import { canCoupleChat } from '@/lib/roomPresence';
 import { playSoundEffect } from '@/lib/sound';
 import { TrafficLight } from '@/components/TrafficLight';
 import { LoveGaugeClock } from '@/components/LoveGaugeClock';
@@ -26,10 +38,15 @@ interface CoupleMatchDashboardProps {
   privacy: PrivacySettings;
   messages: AffectionMessage[];
   onJoinWithCode: (code: string) => void;
+  onGenerateNewCode: () => void;
+  onUpdateMyIdentity: (name: string, avatar: string) => void;
+  onToggleMyChatEnabled: () => void;
   onSimulatePartnerState: (state: TrafficState, shared: boolean) => void;
   onTogglePartnerHistoryOptIn: () => void;
   onSendMessage: (emoji: string, text: string) => void;
 }
+
+const AVATAR_CHOICES = ['💖', '🥰', '🐻', '🔥', '🌙', '🌹'];
 
 export function CoupleMatchDashboard({
   language,
@@ -40,6 +57,9 @@ export function CoupleMatchDashboard({
   privacy,
   messages,
   onJoinWithCode,
+  onGenerateNewCode,
+  onUpdateMyIdentity,
+  onToggleMyChatEnabled,
   onSimulatePartnerState,
   onTogglePartnerHistoryOptIn,
   onSendMessage,
@@ -48,9 +68,82 @@ export function CoupleMatchDashboard({
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [customMsg, setCustomMsg] = useState('');
+  const [nowMs, setNowMs] = useState<number | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const syncClock = () => setNowMs(Date.now());
+    const initTimer = setTimeout(syncClock, 0);
+    const interval = setInterval(syncClock, 15_000);
+    return () => {
+      clearTimeout(initTimer);
+      clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [messages.length]);
 
   const partnerCheckin = couple.partnerLatestCheckin;
   const match = computeCoupleMatch(myCheckin, partnerCheckin);
+
+  const partnerStatus = couple.partnerStatus ?? (couple.isSimulatedPartner ? 'simulated' : couple.partnerLinked ? 'online' : 'waiting');
+  const myChatEnabled = couple.myChatEnabled !== false;
+  const partnerChatEnabled = couple.partnerChatEnabled !== false;
+  const chatAllowed = canCoupleChat({
+    myChatEnabled,
+    partnerChatEnabled,
+    partnerStatus,
+  });
+
+  const recentMinutes =
+    nowMs && couple.partnerLastSeenAt
+      ? Math.max(1, Math.round((nowMs - couple.partnerLastSeenAt) / 60_000))
+      : 1;
+
+  const renderPresencePill = () => {
+    if (partnerStatus === 'online') {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-200 px-3 py-1 text-xs font-extrabold">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          {language === 'es' ? 'En línea ahora' : 'Online agora'} · {couple.partnerAvatar}{' '}
+          {couple.partnerName || (language === 'es' ? 'Pareja' : 'Par')}
+        </span>
+      );
+    }
+    if (partnerStatus === 'recent') {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200 px-3 py-1 text-xs font-bold">
+          <span className="w-2 h-2 rounded-full bg-amber-500" />
+          {language === 'es'
+            ? `Conectado/a hace ${recentMinutes} min`
+            : `Conectado(a) há ${recentMinutes} min`}{' '}
+          · {couple.partnerAvatar} {couple.partnerName}
+        </span>
+      );
+    }
+    if (partnerStatus === 'simulated') {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 text-slate-800 border border-slate-200 px-3 py-1 text-xs font-bold">
+          🧪{' '}
+          {language === 'es'
+            ? 'Simulador Demo (sin pareja real)'
+            : 'Simulador Demo (sem par real)'}
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200 px-3 py-1 text-xs font-bold">
+        <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse" />
+        {language === 'es'
+          ? 'Esperando a tu pareja (1/2 en sala)'
+          : 'Aguardando seu par (1/2 na sala)'}
+      </span>
+    );
+  };
 
   const handleCopy = () => {
     navigator.clipboard?.writeText(couple.inviteCode).catch(() => {});
@@ -87,28 +180,84 @@ export function CoupleMatchDashboard({
 
   return (
     <div className="space-y-6">
-      {/* Couple Linking Card */}
+      {/* 1. Live Connection & Identity Card */}
       <div className="rounded-3xl bg-white/90 backdrop-blur-md border border-rose-100 p-5 shadow-sm space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-lg font-extrabold text-rose-950 flex items-center gap-2">
             <Users className="w-5 h-5 text-rose-500" />
             {language === 'es' ? 'Conexión de Pareja' : 'Conexão do Casal'}
           </h2>
-          <span className="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-bold">
-            {couple.partnerLinked
-              ? `${couple.partnerAvatar} ${couple.partnerName}`
-              : language === 'es'
-              ? 'Esperando pareja'
-              : 'Aguardando par'}
-          </span>
+          {renderPresencePill()}
+        </div>
+
+        {partnerStatus === 'waiting' && (
+          <div className="rounded-2xl bg-amber-50/80 border border-amber-200 px-4 py-3 text-xs text-amber-950 leading-relaxed">
+            ⏳{' '}
+            {language === 'es'
+              ? 'Cuando tu pareja abra tu enlace o ingrese el código, aquí cambiará automáticamente a 🟢 En línea ahora.'
+              : 'Quando seu par abrir seu link ou digitar o código, aqui mudará automaticamente para 🟢 Online agora.'}
+          </div>
+        )}
+
+        {/* My Name & Avatar in this Room */}
+        <div className="rounded-2xl bg-rose-50/50 border border-rose-100 p-3.5 space-y-2.5">
+          <label className="text-xs font-bold text-rose-900 block">
+            {language === 'es'
+              ? 'Tu nombre y avatar en esta sala'
+              : 'Seu nome e avatar nesta sala'}
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              maxLength={32}
+              value={couple.myDisplayName ?? ''}
+              onChange={(e) =>
+                onUpdateMyIdentity(e.target.value, couple.myAvatar || '💖')
+              }
+              placeholder={language === 'es' ? 'Ej: Tu nombre...' : 'Ex: Seu nome...'}
+              className="flex-1 min-w-[140px] rounded-xl bg-white border border-rose-200 px-3 py-1.5 text-sm font-semibold text-rose-950 focus:outline-none focus:ring-2 focus:ring-rose-400"
+            />
+            <div className="flex gap-1">
+              {AVATAR_CHOICES.map((av) => (
+                <button
+                  key={av}
+                  type="button"
+                  onClick={() => {
+                    playSoundEffect('pop', soundEnabled);
+                    onUpdateMyIdentity(couple.myDisplayName ?? '', av);
+                  }}
+                  className={`w-8 h-8 rounded-xl text-base flex items-center justify-center border transition-all cursor-pointer ${
+                    (couple.myAvatar || '💖') === av
+                      ? 'bg-rose-500 border-rose-500 scale-110 shadow'
+                      : 'bg-white border-rose-200 hover:bg-rose-50'
+                  }`}
+                >
+                  {av}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-2xl bg-rose-50/80 border border-rose-200 p-3.5">
-            <p className="text-xs font-bold text-rose-800">
-              {language === 'es' ? 'Tu código de invitación' : 'Seu código de convite'}
-            </p>
-            <div className="mt-1.5 flex items-center justify-between gap-2">
+          <div className="rounded-2xl bg-rose-50/80 border border-rose-200 p-3.5 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-bold text-rose-800">
+                {language === 'es' ? 'Tu código de invitación' : 'Seu código de convite'}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  playSoundEffect('pop', soundEnabled);
+                  onGenerateNewCode();
+                }}
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-700 hover:underline cursor-pointer"
+              >
+                <RefreshCw className="w-3 h-3" />
+                {language === 'es' ? 'Nuevo código' : 'Novo código'}
+              </button>
+            </div>
+            <div className="flex items-center justify-between gap-2">
               <code className="text-base font-extrabold tracking-widest text-rose-950">
                 {couple.inviteCode}
               </code>
@@ -118,19 +267,13 @@ export function CoupleMatchDashboard({
                 className="inline-flex items-center gap-1 rounded-xl bg-white px-3 py-1.5 text-xs font-bold text-rose-700 border border-rose-200 hover:bg-rose-50 cursor-pointer"
               >
                 {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {copied
-                  ? language === 'es'
-                    ? 'Copiado'
-                    : 'Copiado'
-                  : language === 'es'
-                  ? 'Copiar'
-                  : 'Copiar'}
+                {copied ? 'Copiado' : 'Copiar'}
               </button>
             </div>
             <button
               type="button"
               onClick={handleCopyInviteLink}
-              className="mt-2.5 w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-rose-500 px-3 py-2 text-xs font-bold text-white hover:bg-rose-600 cursor-pointer"
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-rose-500 px-3 py-2 text-xs font-bold text-white hover:bg-rose-600 cursor-pointer"
             >
               <Share2 className="w-3.5 h-3.5" />
               {linkCopied
@@ -156,7 +299,7 @@ export function CoupleMatchDashboard({
           >
             <div className="flex-1">
               <label className="text-xs font-bold text-purple-900 block">
-                {language === 'es' ? 'Vincular con código' : 'Vincular com código'}
+                {language === 'es' ? 'Unirse con código' : 'Entrar com código'}
               </label>
               <input
                 type="text"
@@ -170,13 +313,13 @@ export function CoupleMatchDashboard({
               type="submit"
               className="rounded-xl bg-purple-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-purple-700 cursor-pointer"
             >
-              {language === 'es' ? 'Unir' : 'Unir'}
+              {language === 'es' ? 'Unir' : 'Entrar'}
             </button>
           </form>
         </div>
       </div>
 
-      {/* Match Comparison Card */}
+      {/* 2. Match Comparison Card */}
       <div className="rounded-3xl bg-white/90 backdrop-blur-md border border-rose-100 p-6 shadow-lg space-y-5">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-xl font-extrabold text-rose-950 flex items-center gap-2">
@@ -188,7 +331,7 @@ export function CoupleMatchDashboard({
         <div className="grid grid-cols-2 gap-4">
           <div className="rounded-2xl bg-rose-50/60 border border-rose-100 p-4 flex flex-col items-center text-center gap-2">
             <span className="text-xs font-bold text-rose-700">
-              {language === 'es' ? 'Tú' : 'Você'}
+              {couple.myAvatar || '💖'} {couple.myDisplayName || (language === 'es' ? 'Tú' : 'Você')}
             </span>
             {myCheckin && myCheckin.shareMoodState ? (
               <>
@@ -206,7 +349,7 @@ export function CoupleMatchDashboard({
 
           <div className="rounded-2xl bg-purple-50/60 border border-purple-100 p-4 flex flex-col items-center text-center gap-2">
             <span className="text-xs font-bold text-purple-700">
-              {couple.partnerAvatar} {couple.partnerName}
+              {couple.partnerAvatar} {couple.partnerName || (language === 'es' ? 'Tu pareja' : 'Seu par')}
             </span>
             {partnerCheckin && partnerCheckin.shareMoodState ? (
               <>
@@ -217,7 +360,13 @@ export function CoupleMatchDashboard({
               </>
             ) : (
               <p className="text-xs text-purple-800/70 py-4">
-                🔒 {language === 'es' ? 'Modo privado' : 'Modo privado'}
+                {partnerStatus === 'waiting'
+                  ? language === 'es'
+                    ? '⏳ Esperando conexión'
+                    : '⏳ Aguardando conexão'
+                  : language === 'es'
+                  ? '🔒 Aún no envió resultado'
+                  : '🔒 Ainda não enviou resultado'}
               </p>
             )}
           </div>
@@ -259,8 +408,8 @@ export function CoupleMatchDashboard({
               <h3 className="text-sm font-extrabold text-purple-950">
                 {couple.partnerAvatar}{' '}
                 {language === 'es'
-                  ? `Resultado compartido de ${couple.partnerName}`
-                  : `Resultado compartilhado de ${couple.partnerName}`}
+                  ? `Resultado compartido de ${couple.partnerName || 'tu pareja'}`
+                  : `Resultado compartilhado de ${couple.partnerName || 'seu par'}`}
               </h3>
               <span className="text-[11px] font-semibold text-purple-700">
                 {new Date(partnerCheckin.createdAt).toLocaleTimeString([], {
@@ -287,9 +436,7 @@ export function CoupleMatchDashboard({
             {partnerCheckin.shareAffectionPrefs && partnerCheckin.affectionPrefs.length > 0 && (
               <div className="space-y-1">
                 <p className="text-[11px] font-bold text-purple-800">
-                  {language === 'es'
-                    ? 'Lo que le provoca hoy:'
-                    : 'O que dá vontade hoje:'}
+                  {language === 'es' ? 'Lo que le provoca hoy:' : 'O que dá vontade hoje:'}
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {partnerCheckin.affectionPrefs.map((tag) => (
@@ -305,112 +452,206 @@ export function CoupleMatchDashboard({
             )}
           </div>
         )}
+      </div>
 
-        {/* Demo Partner Simulator */}
-        <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3.5 space-y-2">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
-            🧪 {language === 'es' ? 'Simulador de Pareja (Modo Demo)' : 'Simulador de Par (Modo Demo)'}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {(['LIBER', 'CASI_LIBER', 'ANTI_LIBER'] as TrafficState[]).map((st) => (
+      {/* 3. Voluntary 2-Way Private Couple Conversation */}
+      <div className="rounded-3xl bg-white/95 backdrop-blur-md border border-rose-100 p-5 shadow-md space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h3 className="text-lg font-extrabold text-rose-950 flex items-center gap-2">
+              <MessageCircleHeart className="w-5 h-5 text-rose-500" />
+              {language === 'es'
+                ? 'Conversación Privada de Pareja'
+                : 'Conversa Privada do Casal'}
+            </h3>
+            <p className="text-[11px] font-semibold text-rose-800/75 mt-0.5">
+              {partnerStatus === 'waiting'
+                ? language === 'es'
+                  ? '⚪ Esperando a que tu pareja se conecte'
+                  : '⚪ Aguardando seu par se conectar'
+                : partnerChatEnabled
+                ? language === 'es'
+                  ? `🟢 ${couple.partnerName || 'Tu pareja'} acepta conversar`
+                  : `🟢 ${couple.partnerName || 'Seu par'} aceita conversar`
+                : language === 'es'
+                ? `🔒 ${couple.partnerName || 'Tu pareja'} pausó el chat`
+                : `🔒 ${couple.partnerName || 'Seu par'} pausou o chat`}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              playSoundEffect('pop', soundEnabled);
+              onToggleMyChatEnabled();
+            }}
+            className={`rounded-full px-3.5 py-1.5 text-xs font-extrabold border transition-colors cursor-pointer ${
+              myChatEnabled
+                ? 'bg-emerald-100 text-emerald-900 border-emerald-200 hover:bg-emerald-200'
+                : 'bg-rose-100 text-rose-900 border-rose-200 hover:bg-rose-200'
+            }`}
+          >
+            {myChatEnabled
+              ? language === 'es'
+                ? '💬 Chat activo (Pausar)'
+                : '💬 Chat ativo (Pausar)'
+              : language === 'es'
+              ? '⏸️ Chat pausado (Activar)'
+              : '⏸️ Chat pausado (Ativar)'}
+          </button>
+        </div>
+
+        {!myChatEnabled ? (
+          <div className="rounded-2xl bg-rose-50 border border-rose-200 p-4 text-xs font-semibold text-rose-900 text-center">
+            {language === 'es'
+              ? 'Pausaste la conversación. Actívala cuando quieras charlar.'
+              : 'Você pausou a conversa. Ative quando quiser conversar.'}
+          </div>
+        ) : partnerStatus === 'waiting' ? (
+          <div className="rounded-2xl bg-purple-50/70 border border-purple-200 p-4 text-xs font-semibold text-purple-900 text-center">
+            {language === 'es'
+              ? 'Cuando tu pareja entre a la sala podrán conversar aquí en vivo.'
+              : 'Quando seu par entrar na sala vocês poderão conversar aqui ao vivo.'}
+          </div>
+        ) : !partnerChatEnabled && partnerStatus !== 'simulated' ? (
+          <div className="rounded-2xl bg-amber-50 border border-amber-200 p-4 text-xs font-semibold text-amber-950 text-center">
+            {language === 'es'
+              ? 'Tu pareja pausó el chat por ahora. Respeta su espacio con cariño 💛.'
+              : 'Seu par pausou o chat por enquanto. Respeite o espaço com carinho 💛.'}
+          </div>
+        ) : chatAllowed ? (
+          <>
+            {/* Scrollable 2-Way Chat Bubbles */}
+            <div
+              ref={chatScrollRef}
+              className="h-64 overflow-y-auto rounded-2xl bg-gradient-to-b from-rose-50/50 to-purple-50/40 border border-rose-100 p-3.5 space-y-2.5"
+            >
+              {messages.length === 0 ? (
+                <p className="text-center text-xs text-rose-800/65 py-16">
+                  {language === 'es'
+                    ? 'Aún no hay mensajes. ¡Rompan el hielo con un mensaje tierno!'
+                    : 'Ainda sem mensagens. Quebrem o gelo com uma mensagem carinhosa!'}
+                </p>
+              ) : (
+                messages.map((m) => (
+                  <div
+                    key={m.id}
+                    className={`flex flex-col ${m.isFromMe ? 'items-end' : 'items-start'}`}
+                  >
+                    <div
+                      className={`max-w-[82%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ${
+                        m.isFromMe
+                          ? 'bg-gradient-to-br from-rose-500 to-pink-600 text-white rounded-br-sm'
+                          : 'bg-white border border-purple-200 text-purple-950 rounded-bl-sm'
+                      }`}
+                    >
+                      <p className="text-[10px] font-bold opacity-80 mb-0.5">
+                        {m.isFromMe
+                          ? couple.myDisplayName || (language === 'es' ? 'Tú' : 'Você')
+                          : m.senderName}
+                      </p>
+                      <p className="leading-snug">
+                        {m.emoji} {m.text}
+                      </p>
+                    </div>
+                    <span className="text-[10px] text-rose-800/60 mt-0.5 px-1">
+                      {new Date(m.createdAt).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Quick Romantic Prompts */}
+            <div className="flex flex-wrap gap-1.5">
+              {VIRTUAL_AFFECTION_MESSAGES.map((tpl) => (
+                <button
+                  key={tpl.key}
+                  type="button"
+                  onClick={() => {
+                    playSoundEffect('message', soundEnabled);
+                    onSendMessage(tpl.emoji, tpl.text[language]);
+                  }}
+                  className="rounded-full bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-1.5 text-[11px] font-semibold text-rose-950 transition-colors cursor-pointer"
+                >
+                  {tpl.emoji} {tpl.text[language]}
+                </button>
+              ))}
+            </div>
+
+            {/* Chat Input */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!customMsg.trim()) return;
+                playSoundEffect('message', soundEnabled);
+                onSendMessage('💖', customMsg.trim());
+                setCustomMsg('');
+              }}
+              className="flex gap-2"
+            >
+              <input
+                type="text"
+                maxLength={300}
+                value={customMsg}
+                onChange={(e) => setCustomMsg(e.target.value)}
+                placeholder={
+                  language === 'es'
+                    ? 'Escribe un mensaje para conversar...'
+                    : 'Escreva uma mensagem para conversar...'
+                }
+                className="flex-1 rounded-2xl bg-rose-50/60 border border-rose-200 px-4 py-2.5 text-sm text-rose-950 focus:outline-none focus:ring-2 focus:ring-rose-400"
+              />
               <button
-                key={st}
-                type="button"
-                onClick={() => {
-                  playSoundEffect('pop', soundEnabled);
-                  onSimulatePartnerState(st, true);
-                }}
-                className="rounded-xl bg-white border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-100 cursor-pointer"
+                type="submit"
+                className="rounded-2xl bg-rose-500 px-4 py-2.5 text-white font-bold hover:bg-rose-600 transition-colors flex items-center gap-1.5 cursor-pointer"
               >
-                {TRAFFIC_STATE_META[st].emoji} {TRAFFIC_STATE_META[st].badge[language]}
+                <Send className="w-4 h-4" />
               </button>
-            ))}
+            </form>
+          </>
+        ) : null}
+      </div>
+
+      {/* 4. Demo Partner Simulator (Strictly separated for solo testing) */}
+      <div className="rounded-3xl bg-slate-50/90 border border-slate-200 p-4 space-y-2">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
+          🧪{' '}
+          {language === 'es'
+            ? 'Simulador de Pareja (Solo para probar en solitario)'
+            : 'Simulador de Par (Apenas para testar sozinho)'}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {(['LIBER', 'CASI_LIBER', 'ANTI_LIBER'] as TrafficState[]).map((st) => (
             <button
+              key={st}
               type="button"
               onClick={() => {
                 playSoundEffect('pop', soundEnabled);
-                onSimulatePartnerState('CASI_LIBER', false);
+                onSimulatePartnerState(st, true);
               }}
-              className="rounded-xl bg-white border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+              className="rounded-xl bg-white border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-100 cursor-pointer"
             >
-              🔒 {language === 'es' ? 'Pareja en Privado' : 'Par no Privado'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Virtual Affectionate Messages */}
-      <div className="rounded-3xl bg-white/90 backdrop-blur-md border border-rose-100 p-5 shadow-sm space-y-4">
-        <h3 className="text-lg font-extrabold text-rose-950">
-          💌 {language === 'es' ? 'Mensajes Cariñosos Virtuales' : 'Mensagens Carinhosas Virtuais'}
-        </h3>
-        <div className="flex flex-wrap gap-2">
-          {VIRTUAL_AFFECTION_MESSAGES.map((tpl) => (
-            <button
-              key={tpl.key}
-              type="button"
-              onClick={() => {
-                playSoundEffect('message', soundEnabled);
-                onSendMessage(tpl.emoji, tpl.text[language]);
-              }}
-              className="rounded-2xl bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3.5 py-2 text-xs font-semibold text-rose-950 transition-colors cursor-pointer"
-            >
-              {tpl.emoji} {tpl.text[language]}
+              {TRAFFIC_STATE_META[st].emoji} {TRAFFIC_STATE_META[st].badge[language]}
             </button>
           ))}
-        </div>
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!customMsg.trim()) return;
-            playSoundEffect('message', soundEnabled);
-            onSendMessage('💖', customMsg.trim());
-            setCustomMsg('');
-          }}
-          className="flex gap-2"
-        >
-          <input
-            type="text"
-            value={customMsg}
-            onChange={(e) => setCustomMsg(e.target.value)}
-            placeholder={
-              language === 'es'
-                ? 'Escribe un mensajito dulce sin presión...'
-                : 'Escreva uma mensagem doce sem pressão...'
-            }
-            className="flex-1 rounded-2xl bg-rose-50/60 border border-rose-200 px-4 py-2.5 text-sm text-rose-950 focus:outline-none focus:ring-2 focus:ring-rose-400"
-          />
           <button
-            type="submit"
-            className="rounded-2xl bg-rose-500 px-4 py-2.5 text-white font-bold hover:bg-rose-600 transition-colors flex items-center gap-1.5 cursor-pointer"
+            type="button"
+            onClick={() => {
+              playSoundEffect('pop', soundEnabled);
+              onSimulatePartnerState('CASI_LIBER', false);
+            }}
+            className="rounded-xl bg-white border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
           >
-            <Send className="w-4 h-4" />
+            🔒 {language === 'es' ? 'Pareja en Privado' : 'Par no Privado'}
           </button>
-        </form>
-
-        {messages.length > 0 && (
-          <div className="space-y-2 max-h-48 overflow-y-auto pt-2">
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`rounded-2xl px-4 py-2.5 text-sm ${
-                  m.isFromMe
-                    ? 'bg-rose-100/80 text-rose-950 ml-6'
-                    : 'bg-purple-100/80 text-purple-950 mr-6'
-                }`}
-              >
-                <span className="font-bold">{m.senderName}: </span>
-                <span>
-                  {m.emoji} {m.text}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+        </div>
       </div>
 
-      {/* Private Couple History (Mutual Opt-in Only) */}
+      {/* 5. Private Couple History (Mutual Opt-in Only) */}
       <div className="rounded-3xl bg-white/90 backdrop-blur-md border border-rose-100 p-5 shadow-sm space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h3 className="text-base font-extrabold text-rose-950 flex items-center gap-2">

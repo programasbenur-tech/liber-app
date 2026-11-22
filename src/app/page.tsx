@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Heart,
   Gamepad2,
@@ -24,6 +24,7 @@ import {
 } from '@/modules/competitions/CompetitionHub';
 import { TRAFFIC_STATE_META, UI_TEXT } from '@/i18n/translations';
 import { computeCoupleMatch } from '@/lib/match';
+import { generateRoomCode, normalizeRoomMessages } from '@/lib/roomPresence';
 import { playSoundEffect } from '@/lib/sound';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import {
@@ -31,6 +32,7 @@ import {
   CoupleState,
   Language,
   MoodCheckin,
+  PartnerPresenceStatus,
   PrivacySettings,
   TrafficState,
   TrustLabResult,
@@ -84,34 +86,19 @@ function createInitialState(): PersistedState {
     couple: {
       coupleId: 'demo_couple_1',
       inviteCode: 'LIBER-7742',
-      partnerLinked: true,
-      partnerName: 'Mi Amor',
+      partnerLinked: false,
+      partnerName: '',
       partnerAvatar: '💖',
-      partnerLatestCheckin: {
-        id: 'init_partner',
-        userId: 'demo_user_b',
-        score: 78,
-        computedState: 'LIBER',
-        finalState: 'LIBER',
-        manualOverride: false,
-        boundaryLock: 'NONE',
-        shareMoodState: true,
-        shareAffectionPrefs: true,
-        shareEnergyLevel: false,
-        affectionPrefs: ['cuddles', 'massage'],
-        createdAt: initialTimestamp,
-      },
+      partnerLatestCheckin: null,
+      myDisplayName: '',
+      myAvatar: '💖',
+      myChatEnabled: true,
+      partnerChatEnabled: true,
+      partnerStatus: 'waiting',
+      partnerLastSeenAt: null,
+      isSimulatedPartner: false,
     },
-    messages: [
-      {
-        id: 'msg_welcome',
-        senderName: 'Mi Amor',
-        emoji: '🫂',
-        text: 'Te mando un abrazo largo y sin ninguna prisa.',
-        createdAt: initialTimestamp,
-        isFromMe: false,
-      },
-    ],
+    messages: [],
   };
 }
 
@@ -122,7 +109,19 @@ export default function HomePage() {
   const [gameLaunchKey, setGameLaunchKey] = useState(0);
   const [state, setState] = useState<PersistedState>(createInitialState);
   const [slotId, setSlotId] = useState<string>('slot_default');
+  const [roomStorage, setRoomStorage] = useState<'memory' | 'supabase'>('memory');
   const [hasPartnerUpdate, setHasPartnerUpdate] = useState(false);
+  const lastPartnerMsgIdRef = useRef<string | null>(null);
+  const activeTabRef = useRef<Tab>(activeTab);
+  const soundEnabledRef = useRef<boolean>(state.soundEnabled);
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    soundEnabledRef.current = state.soundEnabled;
+  }, [state.soundEnabled]);
 
   useEffect(() => {
     try {
@@ -141,12 +140,31 @@ export default function HomePage() {
 
       setState((prev) => {
         const merged = { ...prev, ...parsed };
+        // Migrate away from legacy hardcoded fake partner if present
+        if (
+          merged.couple.partnerLatestCheckin?.id === 'init_partner' &&
+          !merged.couple.isSimulatedPartner
+        ) {
+          merged.couple = {
+            ...merged.couple,
+            partnerLinked: false,
+            partnerName: '',
+            partnerLatestCheckin: null,
+            partnerStatus: 'waiting',
+            partnerLastSeenAt: null,
+          };
+          merged.messages = [];
+        }
         if (roomParam && roomParam.length >= 4) {
           merged.couple = {
             ...merged.couple,
             inviteCode: roomParam,
-            partnerLinked: true,
+            partnerLinked: false,
+            partnerStatus: 'waiting',
+            partnerLatestCheckin: null,
+            isSimulatedPartner: false,
           };
+          merged.messages = [];
         }
         return merged;
       });
@@ -156,9 +174,14 @@ export default function HomePage() {
     setHydrated(true);
   }, []);
 
-  // Live Local-Network Room Sync when Supabase is not configured
+  // Live Couple Room Sync & Presence Heartbeat (Supabase when configured, memory fallback otherwise)
   useEffect(() => {
-    if (!hydrated || isSupabaseConfigured || !state.couple.inviteCode) return;
+    if (!hydrated || !state.couple.inviteCode) return;
+
+    const myName =
+      state.couple.myDisplayName?.trim() || (state.language === 'es' ? 'Tu Pareja' : 'Seu Par');
+    const myAvatar = state.couple.myAvatar || '💖';
+    const myChatEnabled = state.couple.myChatEnabled !== false;
 
     const pushMyState = () => {
       fetch('/api/room', {
@@ -167,8 +190,9 @@ export default function HomePage() {
         body: JSON.stringify({
           code: state.couple.inviteCode,
           slotId,
-          displayName: state.language === 'es' ? 'Tu Pareja' : 'Seu Par',
-          avatar: '💖',
+          displayName: myName,
+          avatar: myAvatar,
+          chatEnabled: myChatEnabled,
           checkin: state.myCheckin,
         }),
       }).catch(() => {});
@@ -176,20 +200,50 @@ export default function HomePage() {
 
     const pullPartnerState = async () => {
       try {
-        const res = await fetch(
-          `/api/room?code=${encodeURIComponent(state.couple.inviteCode)}&slotId=${encodeURIComponent(slotId)}`
-        );
+        const qs = new URLSearchParams({
+          code: state.couple.inviteCode,
+          slotId,
+          name: myName,
+          avatar: myAvatar,
+          chatEnabled: String(myChatEnabled),
+        });
+        const res = await fetch(`/api/room?${qs.toString()}`);
         if (!res.ok) return;
         const data = (await res.json()) as {
           ok: boolean;
-          partner: { displayName: string; avatar: string; checkin: MoodCheckin | null } | null;
+          storage?: 'memory' | 'supabase';
+          partner: {
+            slotId: string;
+            displayName: string;
+            avatar: string;
+            status: PartnerPresenceStatus;
+            lastSeenAt: number;
+            chatEnabled: boolean;
+            checkin: MoodCheckin | null;
+          } | null;
           messages: AffectionMessage[];
         };
-        if (data.ok && data.partner) {
-          setState((prev) => {
+        if (!data.ok) return;
+        setRoomStorage(data.storage === 'supabase' ? 'supabase' : 'memory');
+
+        const normalizedMsgs = normalizeRoomMessages(data.messages ?? [], slotId);
+        const partnerMsgs = normalizedMsgs.filter((m) => !m.isFromMe);
+        const latestPartnerMsg = partnerMsgs[partnerMsgs.length - 1];
+        if (latestPartnerMsg && latestPartnerMsg.id !== lastPartnerMsgIdRef.current) {
+          if (lastPartnerMsgIdRef.current !== null) {
+            playSoundEffect('message', soundEnabledRef.current);
+            if (activeTabRef.current !== 'match') {
+              setHasPartnerUpdate(true);
+            }
+          }
+          lastPartnerMsgIdRef.current = latestPartnerMsg.id;
+        }
+
+        setState((prev) => {
+          if (data.partner) {
             const prevTime = prev.couple.partnerLatestCheckin?.createdAt;
-            const nextTime = data.partner?.checkin?.createdAt;
-            if (nextTime && nextTime !== prevTime) {
+            const nextTime = data.partner.checkin?.createdAt;
+            if (nextTime && nextTime !== prevTime && activeTabRef.current !== 'match') {
               setHasPartnerUpdate(true);
             }
             return {
@@ -197,14 +251,34 @@ export default function HomePage() {
               couple: {
                 ...prev.couple,
                 partnerLinked: true,
-                partnerName: data.partner?.displayName ?? prev.couple.partnerName,
-                partnerAvatar: data.partner?.avatar ?? prev.couple.partnerAvatar,
-                partnerLatestCheckin: data.partner?.checkin ?? prev.couple.partnerLatestCheckin,
+                partnerName: data.partner.displayName,
+                partnerAvatar: data.partner.avatar,
+                partnerStatus: data.partner.status,
+                partnerLastSeenAt: data.partner.lastSeenAt,
+                partnerChatEnabled: data.partner.chatEnabled,
+                isSimulatedPartner: false,
+                partnerLatestCheckin: data.partner.checkin,
               },
-              messages: data.messages.length > 0 ? data.messages : prev.messages,
+              messages: normalizedMsgs,
             };
-          });
-        }
+          }
+
+          if (prev.couple.isSimulatedPartner) {
+            return prev;
+          }
+
+          return {
+            ...prev,
+            couple: {
+              ...prev.couple,
+              partnerLinked: false,
+              partnerStatus: 'waiting',
+              partnerLastSeenAt: null,
+              partnerLatestCheckin: null,
+            },
+            messages: normalizedMsgs.length > 0 ? normalizedMsgs : prev.messages,
+          };
+        });
       } catch {
         // Ignore network polling error
       }
@@ -212,9 +286,18 @@ export default function HomePage() {
 
     pushMyState();
     pullPartnerState();
-    const timer = setInterval(pullPartnerState, 3000);
+    const timer = setInterval(pullPartnerState, 2500);
     return () => clearInterval(timer);
-  }, [hydrated, state.couple.inviteCode, state.myCheckin, state.language, slotId]);
+  }, [
+    hydrated,
+    state.couple.inviteCode,
+    state.couple.myDisplayName,
+    state.couple.myAvatar,
+    state.couple.myChatEnabled,
+    state.myCheckin,
+    state.language,
+    slotId,
+  ]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -261,31 +344,37 @@ export default function HomePage() {
   };
 
   const sendCoupleMessage = (emoji: string, text: string) => {
-    if (!isSupabaseConfigured) {
-      fetch('/api/room', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code: state.couple.inviteCode,
-          slotId,
-          displayName: lang === 'es' ? 'Tu Pareja' : 'Seu Par',
-          message: { emoji, text },
-        }),
-      }).catch(() => {});
-    }
+    const myName =
+      state.couple.myDisplayName?.trim() || (lang === 'es' ? 'Tu Pareja' : 'Seu Par');
+    const myAvatar = state.couple.myAvatar || '💖';
+    const myChatEnabled = state.couple.myChatEnabled !== false;
+
+    fetch('/api/room', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: state.couple.inviteCode,
+        slotId,
+        displayName: myName,
+        avatar: myAvatar,
+        chatEnabled: myChatEnabled,
+        message: { emoji, text },
+      }),
+    }).catch(() => {});
     setState((prev) => ({
       ...prev,
       messages: [
+        ...prev.messages,
         {
           id: `msg_${Date.now()}`,
-          senderName: lang === 'es' ? 'Tú' : 'Você',
+          senderSlotId: slotId,
+          senderName: myName,
           emoji,
           text,
           createdAt: new Date().toISOString(),
           isFromMe: true,
         },
-        ...prev.messages,
-      ].slice(0, 30),
+      ].slice(-50),
     }));
   };
 
@@ -401,13 +490,54 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Mode Indicator Pill */}
-        <div className="mt-3 rounded-2xl bg-white/75 backdrop-blur-sm border border-rose-100 px-3.5 py-2 text-[11px] font-semibold text-rose-800 flex items-center justify-between gap-2">
-          <span>
-            {isSupabaseConfigured
+        {/* Mode Indicator & Live Partner Presence Pills */}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="rounded-2xl bg-white/75 backdrop-blur-sm border border-rose-100 px-3 py-1.5 text-[11px] font-semibold text-rose-800">
+            {roomStorage === 'supabase' || isSupabaseConfigured
               ? `🔐 ${UI_TEXT.supabaseActiveBanner[lang]}`
               : `🧪 ${UI_TEXT.demoBanner[lang]}`}
-          </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              playSoundEffect('pop', state.soundEnabled);
+              setHasPartnerUpdate(false);
+              setActiveTab('match');
+            }}
+            className={`rounded-2xl px-3 py-1.5 text-[11px] font-extrabold border shadow-sm transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
+              state.couple.partnerStatus === 'online'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                : state.couple.partnerStatus === 'recent'
+                ? 'bg-amber-50 border-amber-200 text-amber-900'
+                : state.couple.partnerStatus === 'simulated'
+                ? 'bg-slate-100 border-slate-200 text-slate-800'
+                : 'bg-white/85 border-rose-200 text-rose-800'
+            }`}
+          >
+            {state.couple.partnerStatus === 'online' ? (
+              <>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                {state.couple.partnerAvatar}{' '}
+                {state.couple.partnerName || (lang === 'es' ? 'Pareja' : 'Par')}{' '}
+                {lang === 'es' ? 'en línea' : 'online'}
+              </>
+            ) : state.couple.partnerStatus === 'recent' ? (
+              <>
+                🟡 {state.couple.partnerAvatar} {state.couple.partnerName}{' '}
+                {lang === 'es' ? 'reciente' : 'recente'}
+              </>
+            ) : state.couple.partnerStatus === 'simulated' ? (
+              <>🧪 Demo</>
+            ) : (
+              <>
+                ⚪{' '}
+                {lang === 'es'
+                  ? `Esperando pareja (${state.couple.inviteCode})`
+                  : `Aguardando par (${state.couple.inviteCode})`}
+              </>
+            )}
+          </button>
         </div>
       </header>
 
@@ -593,13 +723,57 @@ export default function HomePage() {
             couple={state.couple}
             privacy={state.privacy}
             messages={state.messages}
-            onJoinWithCode={(code) =>
+            onJoinWithCode={(code) => {
+              lastPartnerMsgIdRef.current = null;
               setState((prev) => ({
                 ...prev,
                 couple: {
                   ...prev.couple,
                   inviteCode: code,
-                  partnerLinked: true,
+                  partnerLinked: false,
+                  partnerName: '',
+                  partnerLatestCheckin: null,
+                  partnerStatus: 'waiting',
+                  partnerLastSeenAt: null,
+                  isSimulatedPartner: false,
+                },
+                messages: [],
+              }));
+            }}
+            onGenerateNewCode={() => {
+              const newCode = generateRoomCode();
+              lastPartnerMsgIdRef.current = null;
+              setState((prev) => ({
+                ...prev,
+                couple: {
+                  ...prev.couple,
+                  inviteCode: newCode,
+                  partnerLinked: false,
+                  partnerName: '',
+                  partnerLatestCheckin: null,
+                  partnerStatus: 'waiting',
+                  partnerLastSeenAt: null,
+                  isSimulatedPartner: false,
+                },
+                messages: [],
+              }));
+            }}
+            onUpdateMyIdentity={(name, avatar) =>
+              setState((prev) => ({
+                ...prev,
+                couple: {
+                  ...prev.couple,
+                  myDisplayName: name,
+                  myAvatar: avatar,
+                },
+              }))
+            }
+            onToggleMyChatEnabled={() =>
+              setState((prev) => ({
+                ...prev,
+                couple: {
+                  ...prev.couple,
+                  myChatEnabled: prev.couple.myChatEnabled === false,
                 },
               }))
             }
@@ -608,6 +782,12 @@ export default function HomePage() {
                 ...prev,
                 couple: {
                   ...prev.couple,
+                  partnerLinked: true,
+                  partnerName: 'Mi Amor (Demo)',
+                  partnerAvatar: '💖',
+                  partnerStatus: 'simulated',
+                  partnerChatEnabled: true,
+                  isSimulatedPartner: true,
                   partnerLatestCheckin: {
                     id: `sim_${Date.now()}`,
                     userId: 'demo_user_b',
