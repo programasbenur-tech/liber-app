@@ -20,6 +20,8 @@ import { canCoupleChat } from '@/lib/roomPresence';
 import { playSoundEffect } from '@/lib/sound';
 import { TrafficLight } from '@/components/TrafficLight';
 import { LoveGaugeClock } from '@/components/LoveGaugeClock';
+import { DailyDoubleKeyCard } from '@/components/DailyDoubleKeyCard';
+import { PeaceBridgeDrawer } from '@/components/PeaceBridgeDrawer';
 import {
   AffectionMessage,
   CoupleState,
@@ -44,6 +46,7 @@ interface CoupleMatchDashboardProps {
   onSimulatePartnerState: (state: TrafficState, shared: boolean) => void;
   onTogglePartnerHistoryOptIn: () => void;
   onSendMessage: (emoji: string, text: string) => void;
+  slotId?: string;
 }
 
 const AVATAR_CHOICES = ['💖', '🥰', '🐻', '🔥', '🌙', '🌹'];
@@ -63,6 +66,7 @@ export function CoupleMatchDashboard({
   onSimulatePartnerState,
   onTogglePartnerHistoryOptIn,
   onSendMessage,
+  slotId = 'slot_default',
 }: CoupleMatchDashboardProps) {
   const [joinCode, setJoinCode] = useState('');
   const [copied, setCopied] = useState(false);
@@ -454,6 +458,15 @@ export function CoupleMatchDashboard({
         )}
       </div>
 
+      <DailyDoubleKeyCard
+        language={language}
+        soundEnabled={soundEnabled}
+        roomCode={couple.inviteCode}
+        slotId={slotId}
+        myDisplayName={couple.myDisplayName || ''}
+        onDiscussInChat={onSendMessage}
+      />
+
       {/* 3. Voluntary 2-Way Private Couple Conversation */}
       <div className="rounded-3xl bg-white/95 backdrop-blur-md border border-rose-100 p-5 shadow-md space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -564,6 +577,12 @@ export function CoupleMatchDashboard({
                 ))
               )}
             </div>
+
+            <PeaceBridgeDrawer
+              language={language}
+              soundEnabled={soundEnabled}
+              onSendToChat={onSendMessage}
+            />
 
             {/* Quick Romantic Prompts */}
             <div className="flex flex-wrap gap-1.5">

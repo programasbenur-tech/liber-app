@@ -15,6 +15,7 @@ import { FloatingHearts } from '@/components/FloatingHearts';
 import { TrafficLight } from '@/components/TrafficLight';
 import { QuizGame } from '@/components/QuizGame';
 import { CoupleMatchDashboard } from '@/components/CoupleMatchDashboard';
+import { DailyDoubleKeyCard } from '@/components/DailyDoubleKeyCard';
 import { IdeasHub } from '@/components/IdeasHub';
 import { PrivacyCenter } from '@/components/PrivacyCenter';
 import { PlansSection } from '@/components/PlansSection';
@@ -601,6 +602,18 @@ export default function HomePage() {
               </button>
             )}
 
+            <DailyDoubleKeyCard
+              language={lang}
+              soundEnabled={state.soundEnabled}
+              roomCode={state.couple.inviteCode}
+              slotId={slotId}
+              myDisplayName={state.couple.myDisplayName || ''}
+              onDiscussInChat={(emoji, text) => {
+                sendCoupleMessage(emoji, text);
+                setActiveTab('match');
+              }}
+            />
+
             {/* Featured Mystery & Trust Lab Quick Access */}
             <div className="grid grid-cols-2 gap-3">
               <button
@@ -723,6 +736,7 @@ export default function HomePage() {
             couple={state.couple}
             privacy={state.privacy}
             messages={state.messages}
+            slotId={slotId}
             onJoinWithCode={(code) => {
               lastPartnerMsgIdRef.current = null;
               setState((prev) => ({

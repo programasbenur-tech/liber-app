@@ -25,6 +25,13 @@ import {
 } from '../payments/mercadopago.ts';
 import { DEFAULT_PLANS } from '../payments/types.ts';
 import type { MoodCheckin } from '../../types/liber.ts';
+import {
+  REPAIR_CATEGORY_META,
+  REPAIR_PHRASES,
+  buildSoftenedStartupMessage,
+} from '../../data/repairBridge.ts';
+import { DAILY_PROMPTS, getDailyPromptForDate } from '../../data/dailyPrompts.ts';
+import { evaluateDailyUnlock } from '../dailyPromptLogic.ts';
 
 test('Question bank has at least 60 questions across all 8 categories', () => {
   assert.ok(QUESTION_BANK.length >= 60, `Expected >= 60 questions, got ${QUESTION_BANK.length}`);
@@ -323,4 +330,86 @@ test('sanitizeSharedCheckin enforces mood and affection sharing permissions', ()
     shareAffectionPrefs: true,
   });
   assert.deepEqual(fullShared?.affectionPrefs, ['cuddles', 'kisses']);
+});
+
+test('repairBridge exports 12 bilingual phrases evenly across 4 categories', () => {
+  assert.equal(REPAIR_PHRASES.length, 12);
+  const categories = Object.keys(REPAIR_CATEGORY_META);
+  assert.equal(categories.length, 4);
+  for (const cat of categories) {
+    const count = REPAIR_PHRASES.filter((p) => p.category === cat).length;
+    assert.equal(count, 3);
+  }
+  for (const phrase of REPAIR_PHRASES) {
+    assert.ok(phrase.text.es.trim().length > 0);
+    assert.ok(phrase.text['pt-BR'].trim().length > 0);
+  }
+});
+
+test('buildSoftenedStartupMessage formats zero-blame I-statements in es and pt-BR', () => {
+  const esMsg = buildSoftenedStartupMessage({
+    feelingLabel: 'abrumado/a',
+    situation: 'no pudimos hablar tranquilos ayer',
+    needLabel: 'que me escuches 10 minutos sin interrumpir',
+    language: 'es',
+  });
+  assert.ok(esMsg.startsWith('Me sentí abrumado/a cuando no pudimos hablar tranquilos ayer.'));
+  assert.ok(esMsg.includes('Me ayudaría mucho que me escuches 10 minutos sin interrumpir'));
+
+  const ptFallback = buildSoftenedStartupMessage({
+    feelingLabel: 'sobrecarregado(a)',
+    situation: '   ',
+    needLabel: 'um abraço tranquilo para aliviar a tensão',
+    language: 'pt-BR',
+  });
+  assert.ok(ptFallback.startsWith('Me senti sobrecarregado(a) quando aconteceu esse desencontro hoje.'));
+  assert.ok(ptFallback.includes('Me ajudaria muito um abraço tranquilo para aliviar a tensão'));
+});
+
+test('DAILY_PROMPTS has 21 bilingual prompts and deterministic selection by date', () => {
+  assert.equal(DAILY_PROMPTS.length, 21);
+  for (const item of DAILY_PROMPTS) {
+    assert.ok(item.theme.es.trim().length > 0);
+    assert.ok(item.theme['pt-BR'].trim().length > 0);
+    assert.ok(item.prompt.es.trim().length > 0);
+    assert.ok(item.prompt['pt-BR'].trim().length > 0);
+  }
+  const first = getDailyPromptForDate('2026-11-22');
+  const second = getDailyPromptForDate('2026-11-22');
+  assert.equal(first.id, second.id);
+});
+
+test('evaluateDailyUnlock hides partner text until both partners answer', () => {
+  const myEntry = {
+    slotId: 'slot_a',
+    senderName: 'Ana',
+    answerText: 'Gracias por preparar el desayuno',
+    createdAt: '2026-11-22T10:00:00Z',
+  };
+  const partnerEntry = {
+    slotId: 'slot_b',
+    senderName: 'Leo',
+    answerText: 'Me dio paz caminar juntos ayer',
+    createdAt: '2026-11-22T10:05:00Z',
+  };
+
+  const neither = evaluateDailyUnlock({ myAnswer: null, partnerAnswer: null });
+  assert.equal(neither.status, 'neither_answered');
+  assert.equal(neither.visiblePartnerAnswer, null);
+
+  const waitingForMe = evaluateDailyUnlock({ myAnswer: null, partnerAnswer: partnerEntry });
+  assert.equal(waitingForMe.status, 'waiting_for_me');
+  assert.equal(waitingForMe.partnerAnswered, true);
+  assert.equal(waitingForMe.visiblePartnerAnswer, null);
+
+  const waitingForPartner = evaluateDailyUnlock({ myAnswer: myEntry, partnerAnswer: null });
+  assert.equal(waitingForPartner.status, 'waiting_for_partner');
+  assert.equal(waitingForPartner.partnerAnswered, false);
+  assert.equal(waitingForPartner.visiblePartnerAnswer, null);
+
+  const unlocked = evaluateDailyUnlock({ myAnswer: myEntry, partnerAnswer: partnerEntry });
+  assert.equal(unlocked.status, 'unlocked');
+  assert.equal(unlocked.partnerAnswered, true);
+  assert.equal(unlocked.partnerName, 'Leo');
+  assert.equal(unlocked.visiblePartnerAnswer, 'Me dio paz caminar juntos ayer');
 });
