@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Crown, Check, CreditCard } from 'lucide-react';
+import { Crown, Check, CreditCard, ShieldCheck, Sparkles } from 'lucide-react';
+import { isPaywallEnforced } from '@/lib/entitlements';
 import {
   DEFAULT_PLANS,
   formatPlanPrice,
@@ -15,40 +16,62 @@ interface PlansSectionProps {
   language: Language;
   plans?: SubscriptionPlan[];
   currentPlan?: PlanCode;
+  roomCode?: string;
+  slotId?: string;
 }
 
 export function PlansSection({
   language,
   plans = DEFAULT_PLANS,
   currentPlan = 'FREE',
+  roomCode,
+  slotId,
 }: PlansSectionProps) {
-  const [country, setCountry] = useState<CountryCode>(language === 'pt-BR' ? 'BR' : 'UY');
+  const [country, setCountry] = useState<CountryCode>(
+    language === 'pt-BR' ? 'BR' : 'UY'
+  );
+  const [buyerEmail, setBuyerEmail] = useState('');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [needsConfigHint, setNeedsConfigHint] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<PlanCode | null>(null);
+  const paywallActive = isPaywallEnforced();
 
   const handleSubscribe = async (planCode: PlanCode) => {
     if (planCode === 'FREE') return;
     setLoadingPlan(planCode);
     setStatusMessage(null);
+    setNeedsConfigHint(false);
+
     try {
+      const effectiveUserId = slotId
+        ? roomCode
+          ? `${roomCode}_${slotId}`
+          : slotId
+        : 'demo_user_a';
+
       const res = await fetch('/api/checkout/mercadopago', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           planCode,
           country,
-          userId: 'demo_user_a',
+          userId: effectiveUserId,
+          userEmail: buyerEmail.trim() || undefined,
           language,
         }),
       });
+
       const data = (await res.json()) as {
         ok: boolean;
         checkoutUrl?: string;
         error?: string;
+        requiresConfiguration?: boolean;
       };
+
       if (data.ok && data.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
+        window.location.assign(data.checkoutUrl);
       } else {
+        setNeedsConfigHint(Boolean(data.requiresConfiguration));
         setStatusMessage(
           data.error ??
             (language === 'pt-BR'
@@ -69,14 +92,24 @@ export function PlansSection({
 
   return (
     <div className="space-y-5">
-      <div className="rounded-3xl bg-white/90 backdrop-blur-md border border-rose-100 p-5 shadow-sm space-y-3">
+      <div className="rounded-3xl bg-white/95 backdrop-blur-md border border-rose-100 p-5 shadow-sm space-y-3.5">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h2 className="text-xl font-extrabold text-rose-950 flex items-center gap-2">
-              <Crown className="w-5 h-5 text-amber-500" />
-              {language === 'es' ? 'Planes LIBER SaaS' : 'Planos LIBER SaaS'}
-            </h2>
-            <p className="text-xs text-rose-800/80">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-xl font-extrabold text-rose-950 flex items-center gap-2">
+                <Crown className="w-5 h-5 text-amber-500" />
+                {language === 'es' ? 'Planes LIBER SaaS' : 'Planos LIBER SaaS'}
+              </h2>
+              {!paywallActive && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 border border-emerald-200 px-2.5 py-0.5 text-[10px] font-extrabold text-emerald-900">
+                  <Sparkles className="w-3 h-3" />
+                  {language === 'es'
+                    ? 'Lanzamiento abierto (todo desbloqueado hoy)'
+                    : 'Lançamento aberto (tudo liberado hoje)'}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-rose-800/80 mt-0.5">
               {language === 'es'
                 ? 'Pagos locales seguros con Mercado Pago Brasil y Mercado Pago Uruguay.'
                 : 'Pagamentos locais seguros com Mercado Pago Brasil e Mercado Pago Uruguai.'}
@@ -109,17 +142,63 @@ export function PlansSection({
           </div>
         </div>
 
-        <p className="text-[11px] font-semibold text-rose-700">
-          <CreditCard className="w-3.5 h-3.5 inline mr-1" />
-          {country === 'BR'
-            ? 'Mercado Pago Brasil: PIX, Cartão de Crédito, Boleto Bancário.'
-            : 'Mercado Pago Uruguay: Tarjetas locales/internacionales, Abitab y Redpagos.'}
-        </p>
+        {/* Comparison strip */}
+        <div className="grid gap-2 sm:grid-cols-2 rounded-2xl bg-rose-50/70 border border-rose-100 p-3 text-xs">
+          <div>
+            <p className="font-extrabold text-rose-950">
+              💛 {language === 'es' ? 'Gratis para siempre' : 'Grátis para sempre'}
+            </p>
+            <p className="text-[11px] text-rose-900/80 mt-0.5">
+              {language === 'es'
+                ? 'Semáforo del Amor, Chat Privado en vivo, Pregunta Diaria "Doble Llave", Nuestra Llama y Tarjeta Viral.'
+                : 'Semáforo do Amor, Chat Privado ao vivo, Pergunta Diária "Chave Dupla", Chama de Vocês e Cartão Viral.'}
+            </p>
+          </div>
+          <div>
+            <p className="font-extrabold text-rose-950">
+              👑 {language === 'es' ? 'LIBER Premium (Pareja Completa)' : 'LIBER Premium (Casal Completo)'}
+            </p>
+            <p className="text-[11px] text-rose-900/80 mt-0.5">
+              {language === 'es'
+                ? 'Puente de Paz completo, Ritual Antiestrés guiado, Modo Misterio 16 pistas, Test Científico e Historial.'
+                : 'Ponte de Paz completo, Ritual Antiestresse guiado, Modo Mistério 16 pistas, Teste Científico e Histórico.'}
+            </p>
+          </div>
+        </div>
+
+        {/* Optional Email + Payment methods */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <p className="text-[11px] font-semibold text-rose-700">
+            <CreditCard className="w-3.5 h-3.5 inline mr-1" />
+            {country === 'BR'
+              ? 'Mercado Pago Brasil: PIX, Cartão de Crédito, Boleto Bancário.'
+              : 'Mercado Pago Uruguay: Tarjetas locales/internacionales, Abitab y Redpagos.'}
+          </p>
+
+          <input
+            type="email"
+            value={buyerEmail}
+            onChange={(e) => setBuyerEmail(e.target.value)}
+            placeholder={
+              language === 'es'
+                ? 'Tu email para recibo (opcional)'
+                : 'Seu e-mail para recibo (opcional)'
+            }
+            className="rounded-xl bg-rose-50/60 border border-rose-200 px-3 py-1.5 text-xs text-rose-950 placeholder:text-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-300 sm:w-64"
+          />
+        </div>
       </div>
 
       {statusMessage && (
-        <div className="rounded-2xl bg-amber-50 border border-amber-200 p-3.5 text-xs font-semibold text-amber-900">
-          ℹ️ {statusMessage}
+        <div className="rounded-2xl bg-amber-50 border border-amber-200 p-4 text-xs text-amber-950 space-y-1.5">
+          <p className="font-bold">ℹ️ {statusMessage}</p>
+          {needsConfigHint && (
+            <p className="text-[11px] text-amber-900/85 leading-relaxed">
+              {language === 'es'
+                ? 'Para activar cobros reales en producción, agrega en Cloudflare → Settings → Variables and Secrets: PAYMENTS_ENABLED=true, MP_ACCESS_TOKEN_BR / MP_ACCESS_TOKEN_UY y MP_WEBHOOK_SECRET.'
+                : 'Para ativar cobranças reais em produção, adicione no Cloudflare → Settings → Variables and Secrets: PAYMENTS_ENABLED=true, MP_ACCESS_TOKEN_BR / MP_ACCESS_TOKEN_UY e MP_WEBHOOK_SECRET.'}
+            </p>
+          )}
         </div>
       )}
 
@@ -195,6 +274,13 @@ export function PlansSection({
             );
           })}
       </div>
+
+      <p className="text-center text-[11px] font-semibold text-rose-900/75 flex items-center justify-center gap-1.5">
+        <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+        {language === 'es'
+          ? 'Pago seguro con Mercado Pago · Cancela cuando quieras · Tus respuestas siguen 100% privadas.'
+          : 'Pagamento seguro com Mercado Pago · Cancele quando quiser · Suas respostas continuam 100% privadas.'}
+      </p>
     </div>
   );
 }

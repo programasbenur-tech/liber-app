@@ -16,6 +16,8 @@ import { TrafficLight } from '@/components/TrafficLight';
 import { QuizGame } from '@/components/QuizGame';
 import { CoupleMatchDashboard } from '@/components/CoupleMatchDashboard';
 import { DailyDoubleKeyCard } from '@/components/DailyDoubleKeyCard';
+import { CoupleFlameCard } from '@/components/CoupleFlameCard';
+import { ViralCardStudio } from '@/components/ViralCardStudio';
 import { IdeasHub } from '@/components/IdeasHub';
 import { PrivacyCenter } from '@/components/PrivacyCenter';
 import { PlansSection } from '@/components/PlansSection';
@@ -24,6 +26,15 @@ import {
   isCompetitionModeEnabled,
 } from '@/modules/competitions/CompetitionHub';
 import { TRAFFIC_STATE_META, UI_TEXT } from '@/i18n/translations';
+import {
+  FLAME_STAGE_META,
+  type FlameActionType,
+  type FlameSummary,
+} from '@/lib/flameLogic';
+import {
+  parsePaymentReturnStatus,
+  type PaymentReturnBanner,
+} from '@/lib/entitlements';
 import { computeCoupleMatch } from '@/lib/match';
 import { generateRoomCode, normalizeRoomMessages } from '@/lib/roomPresence';
 import { playSoundEffect } from '@/lib/sound';
@@ -112,6 +123,9 @@ export default function HomePage() {
   const [slotId, setSlotId] = useState<string>('slot_default');
   const [roomStorage, setRoomStorage] = useState<'memory' | 'supabase'>('memory');
   const [hasPartnerUpdate, setHasPartnerUpdate] = useState(false);
+  const [flameRefreshKey, setFlameRefreshKey] = useState(0);
+  const [flameSummary, setFlameSummary] = useState<FlameSummary | null>(null);
+  const [paymentBanner, setPaymentBanner] = useState<PaymentReturnBanner | null>(null);
   const lastPartnerMsgIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<Tab>(activeTab);
   const soundEnabledRef = useRef<boolean>(state.soundEnabled);
@@ -138,6 +152,10 @@ export default function HomePage() {
       const parsed = raw ? (JSON.parse(raw) as Partial<PersistedState>) : {};
       const params = new URLSearchParams(window.location.search);
       const roomParam = params.get('room')?.trim().toUpperCase();
+      const paymentStatus = parsePaymentReturnStatus(params.get('payment'));
+      if (paymentStatus) {
+        setPaymentBanner(paymentStatus);
+      }
 
       setState((prev) => {
         const merged = { ...prev, ...parsed };
@@ -344,7 +362,37 @@ export default function HomePage() {
     }));
   };
 
-  const sendCoupleMessage = (emoji: string, text: string) => {
+  const logFlameEvent = (actionType: FlameActionType, note?: string) => {
+    const myName =
+      state.couple.myDisplayName?.trim() ||
+      (lang === 'es' ? 'Tu Pareja' : 'Seu Par');
+
+    fetch('/api/flame', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: state.couple.inviteCode,
+        slotId,
+        senderName: myName,
+        actionType,
+        note,
+      }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { ok?: boolean; summary?: FlameSummary } | null) => {
+        if (data?.ok) {
+          if (data.summary) setFlameSummary(data.summary);
+          setFlameRefreshKey((k) => k + 1);
+        }
+      })
+      .catch(() => {});
+  };
+
+  const sendCoupleMessage = (
+    emoji: string,
+    text: string,
+    flameType: FlameActionType = 'affection'
+  ) => {
     const myName =
       state.couple.myDisplayName?.trim() || (lang === 'es' ? 'Tu Pareja' : 'Seu Par');
     const myAvatar = state.couple.myAvatar || '💖';
@@ -362,6 +410,7 @@ export default function HomePage() {
         message: { emoji, text },
       }),
     }).catch(() => {});
+    logFlameEvent(flameType);
     setState((prev) => ({
       ...prev,
       messages: [
@@ -544,6 +593,31 @@ export default function HomePage() {
 
       {/* Main Content */}
       <main className="relative z-10 max-w-2xl mx-auto px-4 pt-2 space-y-6">
+        {paymentBanner && (
+          <div
+            className={`rounded-3xl p-4 border shadow-sm flex items-start justify-between gap-3 ${
+              paymentBanner.kind === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                : paymentBanner.kind === 'pending'
+                ? 'bg-amber-50 border-amber-200 text-amber-950'
+                : 'bg-rose-50 border-rose-200 text-rose-950'
+            }`}
+          >
+            <div className="space-y-0.5 text-xs">
+              <p className="font-extrabold">{paymentBanner.title[lang]}</p>
+              <p className="opacity-85 leading-relaxed">{paymentBanner.message[lang]}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPaymentBanner(null)}
+              className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-extrabold border border-black/10 cursor-pointer shrink-0"
+              aria-label="Cerrar"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {activeTab === 'home' && (
           <div className="space-y-5">
             <div className="rounded-3xl bg-white/90 backdrop-blur-md border border-rose-100 p-6 shadow-xl space-y-5">
@@ -602,6 +676,17 @@ export default function HomePage() {
               </button>
             )}
 
+            <CoupleFlameCard
+              compact
+              language={lang}
+              soundEnabled={state.soundEnabled}
+              roomCode={state.couple.inviteCode}
+              slotId={slotId}
+              myDisplayName={state.couple.myDisplayName || ''}
+              refreshKey={flameRefreshKey}
+              onFlameSummaryChange={setFlameSummary}
+            />
+
             <DailyDoubleKeyCard
               language={lang}
               soundEnabled={state.soundEnabled}
@@ -612,7 +697,50 @@ export default function HomePage() {
                 sendCoupleMessage(emoji, text);
                 setActiveTab('match');
               }}
+              onAnswerSubmitted={() => logFlameEvent('daily_key')}
             />
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  playSoundEffect('casi', state.soundEnabled);
+                  setActiveTab('match');
+                }}
+                className="rounded-3xl bg-gradient-to-br from-emerald-500 to-teal-600 p-4 text-left text-white shadow-md hover:scale-[1.02] transition-transform cursor-pointer"
+              >
+                <div className="text-xl">🧘🤍</div>
+                <p className="mt-1.5 font-extrabold text-sm">
+                  {lang === 'es' ? 'Ritual Antiestrés' : 'Ritual Antiestresse'}
+                </p>
+                <p className="text-[11px] text-emerald-50 mt-0.5">
+                  {lang === 'es'
+                    ? '2 a 10 min de escucha sin juicios'
+                    : '2 a 10 min de escuta sem julgamentos'}
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  playSoundEffect('pop', state.soundEnabled);
+                  setActiveTab('ideas');
+                }}
+                className="rounded-3xl bg-gradient-to-br from-amber-500 via-rose-500 to-purple-600 p-4 text-left text-white shadow-md hover:scale-[1.02] transition-transform cursor-pointer"
+              >
+                <div className="text-xl">📲💎</div>
+                <p className="mt-1.5 font-extrabold text-sm">
+                  {lang === 'es'
+                    ? 'Tarjeta Viral + Premium'
+                    : 'Cartão Viral + Premium'}
+                </p>
+                <p className="text-[11px] text-rose-50 mt-0.5">
+                  {lang === 'es'
+                    ? 'Comparte Stories o mejora tu plan'
+                    : 'Compartilhe Stories ou veja planos'}
+                </p>
+              </button>
+            </div>
 
             {/* Featured Mystery & Trust Lab Quick Access */}
             <div className="grid grid-cols-2 gap-3">
@@ -828,14 +956,31 @@ export default function HomePage() {
                 },
               }))
             }
-            onSendMessage={sendCoupleMessage}
+            onSendMessage={(emoji, text) => sendCoupleMessage(emoji, text, 'affection')}
+            onSendRepairMessage={(emoji, text) => sendCoupleMessage(emoji, text, 'repair')}
+            flameRefreshKey={flameRefreshKey}
+            onLogFlame={logFlameEvent}
+            onFlameSummaryChange={setFlameSummary}
           />
         )}
 
         {activeTab === 'ideas' && (
           <div className="space-y-6">
             <IdeasHub language={lang} soundEnabled={state.soundEnabled} />
-            <PlansSection language={lang} />
+            <ViralCardStudio
+              language={lang}
+              soundEnabled={state.soundEnabled}
+              trafficState={currentTrafficState}
+              flamePoints={flameSummary?.totalPoints ?? 0}
+              flameStageTitle={
+                flameSummary ? FLAME_STAGE_META[flameSummary.stage].title[lang] : undefined
+              }
+            />
+            <PlansSection
+              language={lang}
+              roomCode={state.couple.inviteCode}
+              slotId={slotId}
+            />
             <CompetitionHub language={lang} enabled={isCompetitionModeEnabled()} />
           </div>
         )}

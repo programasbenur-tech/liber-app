@@ -32,6 +32,28 @@ import {
 } from '../../data/repairBridge.ts';
 import { DAILY_PROMPTS, getDailyPromptForDate } from '../../data/dailyPrompts.ts';
 import { evaluateDailyUnlock } from '../dailyPromptLogic.ts';
+import {
+  FLAME_ACTION_POINTS,
+  computeFlameSummary,
+  type FlameEvent,
+} from '../flameLogic.ts';
+import {
+  ANTI_STRESS_PROMPTS,
+  ANTI_STRESS_RULES,
+  CLINICAL_RITUAL_NOTE,
+  EMPATHY_REPLIES,
+  RITUAL_STAGES,
+} from '../../data/antiStressRitual.ts';
+import {
+  DEFAULT_PUBLIC_APP_URL,
+  buildViralCardPayload,
+  sanitizePublicShareUrl,
+} from '../viralCard.ts';
+import {
+  canAccessFeature,
+  isPaywallEnforced,
+  parsePaymentReturnStatus,
+} from '../entitlements.ts';
 
 test('Question bank has at least 60 questions across all 8 categories', () => {
   assert.ok(QUESTION_BANK.length >= 60, `Expected >= 60 questions, got ${QUESTION_BANK.length}`);
@@ -412,4 +434,198 @@ test('evaluateDailyUnlock hides partner text until both partners answer', () => 
   assert.equal(unlocked.partnerAnswered, true);
   assert.equal(unlocked.partnerName, 'Leo');
   assert.equal(unlocked.visiblePartnerAnswer, 'Me dio paz caminar juntos ayer');
+});
+
+test('computeFlameSummary advances stages and never resets points on old rest days', () => {
+  const nowMs = Date.parse('2026-11-22T18:00:00Z');
+  const oldEvents: FlameEvent[] = [
+    {
+      id: 'f1',
+      slotId: 'slot_a',
+      senderName: 'Ana',
+      actionType: 'anti_stress',
+      points: FLAME_ACTION_POINTS.anti_stress,
+      createdAt: '2026-10-01T12:00:00Z',
+    },
+    {
+      id: 'f2',
+      slotId: 'slot_b',
+      senderName: 'Leo',
+      actionType: 'repair',
+      points: FLAME_ACTION_POINTS.repair,
+      createdAt: '2026-10-05T12:00:00Z',
+    },
+    {
+      id: 'f3',
+      slotId: 'slot_a',
+      senderName: 'Ana',
+      actionType: 'daily_key',
+      points: FLAME_ACTION_POINTS.daily_key,
+      createdAt: '2026-10-10T12:00:00Z',
+    },
+  ];
+
+  const restingSummary = computeFlameSummary(oldEvents, nowMs);
+  assert.equal(restingSummary.totalPoints, 7);
+  assert.equal(restingSummary.stage, 'warmth');
+  assert.equal(restingSummary.status, 'resting');
+  assert.equal(restingSummary.todayCount, 0);
+  assert.equal(restingSummary.activeDaysLast7, 0);
+
+  // Add enough events to cross hearth (15) and beacon (30)
+  const manyOldEvents: FlameEvent[] = Array.from({ length: 10 }, (_, idx) => ({
+    id: `old_${idx}`,
+    slotId: 'slot_a',
+    senderName: 'Ana',
+    actionType: 'anti_stress' as const,
+    points: 3,
+    createdAt: '2026-09-15T12:00:00Z',
+  }));
+  const beaconSummary = computeFlameSummary(manyOldEvents, nowMs);
+  assert.equal(beaconSummary.totalPoints, 30);
+  assert.equal(beaconSummary.stage, 'beacon');
+  assert.equal(beaconSummary.progressPercent, 100);
+  assert.equal(beaconSummary.nextStagePoints, null);
+});
+
+test('computeFlameSummary marks glowing and tracks activeDaysLast7 with recent activity', () => {
+  const nowMs = Date.parse('2026-11-22T18:00:00Z');
+  const events: FlameEvent[] = [
+    {
+      id: 'e1',
+      slotId: 'slot_a',
+      senderName: 'Ana',
+      actionType: 'spark',
+      points: FLAME_ACTION_POINTS.spark,
+      createdAt: '2026-11-22T09:00:00Z',
+    },
+    {
+      id: 'e2',
+      slotId: 'slot_b',
+      senderName: 'Leo',
+      actionType: 'repair',
+      points: FLAME_ACTION_POINTS.repair,
+      createdAt: '2026-11-22T15:00:00Z',
+    },
+    {
+      id: 'e3',
+      slotId: 'slot_a',
+      senderName: 'Ana',
+      actionType: 'affection',
+      points: FLAME_ACTION_POINTS.affection,
+      createdAt: '2026-11-20T12:00:00Z',
+    },
+    {
+      id: 'e4',
+      slotId: 'slot_b',
+      senderName: 'Leo',
+      actionType: 'anti_stress',
+      points: FLAME_ACTION_POINTS.anti_stress,
+      createdAt: '2026-11-10T12:00:00Z',
+    },
+  ];
+
+  const summary = computeFlameSummary(events, nowMs);
+  assert.equal(summary.status, 'glowing');
+  assert.equal(summary.todayCount, 2);
+  assert.equal(summary.activeDaysLast7, 2);
+  assert.equal(summary.totalPoints, 7);
+  assert.equal(summary.recentEvents[0]?.id, 'e2');
+});
+
+test('antiStressRitual exports bilingual rules, prompts, empathy replies, stages and non-clinical note', () => {
+  assert.equal(ANTI_STRESS_RULES.length, 3);
+  assert.equal(ANTI_STRESS_PROMPTS.length, 6);
+  assert.equal(EMPATHY_REPLIES.length, 6);
+  assert.equal(RITUAL_STAGES.length, 4);
+  assert.ok(CLINICAL_RITUAL_NOTE.es.length > 0);
+  assert.ok(CLINICAL_RITUAL_NOTE['pt-BR'].length > 0);
+  for (const r of [...ANTI_STRESS_RULES]) {
+    assert.ok(r.title.es.trim().length > 0);
+    assert.ok(r.title['pt-BR'].trim().length > 0);
+  }
+  for (const item of [...ANTI_STRESS_PROMPTS, ...EMPATHY_REPLIES]) {
+    assert.ok(item.text.es.trim().length > 0);
+    assert.ok(item.text['pt-BR'].trim().length > 0);
+  }
+});
+
+test('buildViralCardPayload strips room codes and localhost URLs and builds safe WhatsApp links', () => {
+  assert.equal(
+    sanitizePublicShareUrl('http://localhost:3000/?room=LIBER-9999#secret'),
+    DEFAULT_PUBLIC_APP_URL
+  );
+  assert.equal(
+    sanitizePublicShareUrl('http://192.168.4.107:3000/?room=PRIV123'),
+    DEFAULT_PUBLIC_APP_URL
+  );
+  assert.equal(
+    sanitizePublicShareUrl('https://liber-app.programasbenur.workers.dev/?room=LIBER-7742'),
+    'https://liber-app.programasbenur.workers.dev'
+  );
+
+  const themes = ['traffic_mood', 'flame_team', 'peace_bridge', 'mystery_vibe'] as const;
+  const states = ['LIBER', 'CASI_LIBER', 'ANTI_LIBER'] as const;
+
+  for (const theme of themes) {
+    for (const trafficState of states) {
+      const esCard = buildViralCardPayload({
+        language: 'es',
+        trafficState,
+        flamePoints: 18,
+        theme,
+        rawAppUrl: 'https://liber-app.programasbenur.workers.dev/?room=PRIVATE-CODE',
+      });
+      const ptCard = buildViralCardPayload({
+        language: 'pt-BR',
+        trafficState,
+        flamePoints: 18,
+        theme,
+      });
+      assert.ok(esCard.title.length > 0);
+      assert.ok(ptCard.title.length > 0);
+      assert.equal(esCard.whatsappText.includes('PRIVATE-CODE'), false);
+      assert.ok(esCard.whatsappShareHref.startsWith('https://wa.me/?text='));
+    }
+  }
+});
+
+test('entitlements soft-launch preview defaults open and paywall enforcement gates FREE only', () => {
+  assert.equal(isPaywallEnforced(), false);
+  assert.equal(isPaywallEnforced('true'), true);
+
+  const freeSoftLaunch = canAccessFeature({
+    plan: 'FREE',
+    feature: 'anti_stress_ritual',
+  });
+  assert.deepEqual(freeSoftLaunch, { allowed: true, isLaunchPreview: true });
+
+  const freeEnforced = canAccessFeature({
+    plan: 'FREE',
+    feature: 'mystery_full',
+    paywallEnforced: true,
+  });
+  assert.deepEqual(freeEnforced, { allowed: false, isLaunchPreview: false });
+
+  const premiumEnforced = canAccessFeature({
+    plan: 'PREMIUM',
+    feature: 'mystery_full',
+    paywallEnforced: true,
+  });
+  assert.deepEqual(premiumEnforced, { allowed: true, isLaunchPreview: false });
+
+  const plusEnforced = canAccessFeature({
+    plan: 'PLUS',
+    feature: 'couple_history',
+    paywallEnforced: true,
+  });
+  assert.deepEqual(plusEnforced, { allowed: true, isLaunchPreview: false });
+});
+
+test('parsePaymentReturnStatus maps Mercado Pago return query params accurately', () => {
+  assert.equal(parsePaymentReturnStatus('pending_verification')?.kind, 'success');
+  assert.equal(parsePaymentReturnStatus('pending')?.kind, 'pending');
+  assert.equal(parsePaymentReturnStatus('failure')?.kind, 'failure');
+  assert.equal(parsePaymentReturnStatus('unknown'), null);
+  assert.equal(parsePaymentReturnStatus(null), null);
 });

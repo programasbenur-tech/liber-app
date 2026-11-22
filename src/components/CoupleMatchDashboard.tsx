@@ -22,6 +22,9 @@ import { TrafficLight } from '@/components/TrafficLight';
 import { LoveGaugeClock } from '@/components/LoveGaugeClock';
 import { DailyDoubleKeyCard } from '@/components/DailyDoubleKeyCard';
 import { PeaceBridgeDrawer } from '@/components/PeaceBridgeDrawer';
+import { CoupleFlameCard } from '@/components/CoupleFlameCard';
+import { AntiStressRitualCard } from '@/components/AntiStressRitualCard';
+import type { FlameActionType, FlameSummary } from '@/lib/flameLogic';
 import {
   AffectionMessage,
   CoupleState,
@@ -46,7 +49,11 @@ interface CoupleMatchDashboardProps {
   onSimulatePartnerState: (state: TrafficState, shared: boolean) => void;
   onTogglePartnerHistoryOptIn: () => void;
   onSendMessage: (emoji: string, text: string) => void;
+  onSendRepairMessage?: (emoji: string, text: string) => void;
   slotId?: string;
+  flameRefreshKey?: number;
+  onLogFlame?: (actionType: FlameActionType, note?: string) => void;
+  onFlameSummaryChange?: (summary: FlameSummary) => void;
 }
 
 const AVATAR_CHOICES = ['💖', '🥰', '🐻', '🔥', '🌙', '🌹'];
@@ -66,7 +73,11 @@ export function CoupleMatchDashboard({
   onSimulatePartnerState,
   onTogglePartnerHistoryOptIn,
   onSendMessage,
+  onSendRepairMessage,
   slotId = 'slot_default',
+  flameRefreshKey = 0,
+  onLogFlame,
+  onFlameSummaryChange,
 }: CoupleMatchDashboardProps) {
   const [joinCode, setJoinCode] = useState('');
   const [copied, setCopied] = useState(false);
@@ -458,6 +469,16 @@ export function CoupleMatchDashboard({
         )}
       </div>
 
+      <CoupleFlameCard
+        language={language}
+        soundEnabled={soundEnabled}
+        roomCode={couple.inviteCode}
+        slotId={slotId}
+        myDisplayName={couple.myDisplayName || ''}
+        refreshKey={flameRefreshKey}
+        onFlameSummaryChange={onFlameSummaryChange}
+      />
+
       <DailyDoubleKeyCard
         language={language}
         soundEnabled={soundEnabled}
@@ -465,6 +486,14 @@ export function CoupleMatchDashboard({
         slotId={slotId}
         myDisplayName={couple.myDisplayName || ''}
         onDiscussInChat={onSendMessage}
+        onAnswerSubmitted={() => onLogFlame?.('daily_key')}
+      />
+
+      <AntiStressRitualCard
+        language={language}
+        soundEnabled={soundEnabled}
+        onSendToChat={onSendMessage}
+        onCompleteRitual={() => onLogFlame?.('anti_stress')}
       />
 
       {/* 3. Voluntary 2-Way Private Couple Conversation */}
@@ -581,7 +610,14 @@ export function CoupleMatchDashboard({
             <PeaceBridgeDrawer
               language={language}
               soundEnabled={soundEnabled}
-              onSendToChat={onSendMessage}
+              onSendToChat={(emoji, text) => {
+                if (onSendRepairMessage) {
+                  onSendRepairMessage(emoji, text);
+                } else {
+                  onSendMessage(emoji, text);
+                  onLogFlame?.('repair');
+                }
+              }}
             />
 
             {/* Quick Romantic Prompts */}

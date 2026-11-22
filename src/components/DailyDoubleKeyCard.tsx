@@ -14,6 +14,7 @@ interface DailyDoubleKeyCardProps {
   slotId: string;
   myDisplayName: string;
   onDiscussInChat?: (emoji: string, text: string) => void;
+  onAnswerSubmitted?: () => void;
 }
 
 interface DailyApiResponse {
@@ -41,6 +42,7 @@ export function DailyDoubleKeyCard({
   slotId,
   myDisplayName,
   onDiscussInChat,
+  onAnswerSubmitted,
 }: DailyDoubleKeyCardProps) {
   const [dateKey, setDateKey] = useState<string | null>(null);
   const [dailyState, setDailyState] = useState<DailyApiResponse | null>(null);
@@ -124,6 +126,7 @@ export function DailyDoubleKeyCard({
           setDailyState(data);
           setDraft('');
           playSoundEffect(data.status === 'unlocked' ? 'insight' : 'pop', soundEnabled);
+          onAnswerSubmitted?.();
         }
       }
     } finally {
