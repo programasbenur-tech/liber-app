@@ -1,6 +1,6 @@
 'use client';
 
-type SoundKind = 'liber' | 'casi' | 'anti' | 'pop' | 'roulette' | 'message';
+type SoundKind = 'liber' | 'casi' | 'anti' | 'pop' | 'roulette' | 'message' | 'mystery' | 'insight';
 
 let audioCtx: AudioContext | null = null;
 
@@ -60,6 +60,15 @@ export function playSoundEffect(kind: SoundKind, enabled: boolean) {
       case 'message':
         playTone(587.33, 0, 0.1, 'sine', 0.06);
         playTone(880, 0.08, 0.18, 'sine', 0.06);
+        break;
+      case 'mystery':
+        playTone(392, 0, 0.16, 'sine', 0.05);
+        playTone(493.88, 0.11, 0.18, 'sine', 0.05);
+        playTone(587.33, 0.22, 0.28, 'triangle', 0.06);
+        break;
+      case 'insight':
+        playTone(523.25, 0, 0.12, 'triangle', 0.05);
+        playTone(783.99, 0.09, 0.2, 'sine', 0.06);
         break;
       case 'pop':
       default:

@@ -170,3 +170,77 @@ export const UI_TEXT = {
     'pt-BR': 'Tem certeza de que deseja apagar todos os seus dados locais e reiniciar o LIBER?',
   },
 };
+
+export const MYSTERY_UI = {
+  title: { es: 'Modo Misterio', 'pt-BR': 'Modo Mistério' },
+  subtitle: {
+    es: 'Seducción sutil, cero preguntas directas',
+    'pt-BR': 'Sedução sutil, zero perguntas diretas',
+  },
+  badge: { es: 'Sin preguntas directas', 'pt-BR': 'Sem perguntas diretas' },
+  radarLabel: { es: 'Brújula del Misterio', 'pt-BR': 'Bússola do Mistério' },
+  sealedTitle: {
+    es: 'Sobre Lacrado Listo',
+    'pt-BR': 'Envelope Lacrado Pronto',
+  },
+  sealedBody: {
+    es: 'Todas tus pistas nocturnas quedaron guardadas en este sobre secreto.',
+    'pt-BR': 'Todas as suas pistas noturnas foram guardadas neste envelope secreto.',
+  },
+  openEnvelopeBtn: {
+    es: '✉️ Romper el sello y revelar el misterio',
+    'pt-BR': '✉️ Romper o selo e revelar o mistério',
+  },
+  autonomyNotice: {
+    es: 'El Modo Misterio solo lee el clima del juego. Tú confirmas o cambias tu Semáforo real antes de compartirlo.',
+    'pt-BR': 'O Modo Mistério lê apenas o clima do jogo. Você confirma ou ajusta seu Semáforo real antes de compartilhar.',
+  },
+  confirmSendBtn: {
+    es: 'Confirmar y Enviar mi Semáforo',
+    'pt-BR': 'Confirmar e Enviar meu Semáforo',
+  },
+};
+
+export const TRUST_LAB_UI = {
+  title: {
+    es: 'Ciencia de la Fidelidad y Confianza',
+    'pt-BR': 'Ciência da Fidelidade e Confiança',
+  },
+  subtitle: {
+    es: 'Basado en Gottman, Rusbult, Glass, Fincham & May y Fisher',
+    'pt-BR': 'Baseado em Gottman, Rusbult, Glass, Fincham & May e Fisher',
+  },
+  badge: { es: 'Estudio científico', 'pt-BR': 'Estudo científico' },
+  startQuick: {
+    es: 'Chequeo Rápido (8 preguntas)',
+    'pt-BR': 'Check-up Rápido (8 perguntas)',
+  },
+  startFull: {
+    es: 'Estudio Completo (16 preguntas)',
+    'pt-BR': 'Estudo Completo (16 perguntas)',
+  },
+  scientificFactTitle: {
+    es: '🧪 Dato Científico',
+    'pt-BR': '🧪 Dado Científico',
+  },
+  nextQuestion: {
+    es: 'Siguiente pregunta →',
+    'pt-BR': 'Próxima pergunta →',
+  },
+  viewMap: {
+    es: 'Ver mi Mapa de Confianza →',
+    'pt-BR': 'Ver meu Mapa de Confiança →',
+  },
+  strongestLabel: {
+    es: 'Tu mayor fortaleza',
+    'pt-BR': 'Sua maior força',
+  },
+  focusLabel: {
+    es: 'Tema sugerido para conversar',
+    'pt-BR': 'Tema sugerido para conversar',
+  },
+  invitePartnerBtn: {
+    es: '💌 Invitar a mi pareja a conversar este tema',
+    'pt-BR': '💌 Convidar meu par para conversar sobre este tema',
+  },
+};

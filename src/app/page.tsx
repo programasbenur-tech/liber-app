@@ -33,6 +33,7 @@ import {
   MoodCheckin,
   PrivacySettings,
   TrafficState,
+  TrustLabResult,
 } from '@/types/liber';
 
 type Tab = 'home' | 'game' | 'match' | 'ideas' | 'privacy';
@@ -46,6 +47,7 @@ interface PersistedState {
   privacy: PrivacySettings;
   myCheckin: MoodCheckin | null;
   myHistory: MoodCheckin[];
+  latestTrustResult?: TrustLabResult | null;
   couple: CoupleState;
   messages: AffectionMessage[];
 }
@@ -78,6 +80,7 @@ function createInitialState(): PersistedState {
       createdAt: initialTimestamp,
     },
     myHistory: [],
+    latestTrustResult: null,
     couple: {
       coupleId: 'demo_couple_1',
       inviteCode: 'LIBER-7742',
@@ -115,6 +118,8 @@ function createInitialState(): PersistedState {
 export default function HomePage() {
   const [hydrated, setHydrated] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('home');
+  const [requestedGameMode, setRequestedGameMode] = useState<'menu' | 'mystery' | 'trust_lab'>('menu');
+  const [gameLaunchKey, setGameLaunchKey] = useState(0);
   const [state, setState] = useState<PersistedState>(createInitialState);
   const [slotId, setSlotId] = useState<string>('slot_default');
   const [hasPartnerUpdate, setHasPartnerUpdate] = useState(false);
@@ -252,6 +257,35 @@ export default function HomePage() {
       ...prev,
       myCheckin: checkin,
       myHistory: [checkin, ...prev.myHistory].slice(0, 20),
+    }));
+  };
+
+  const sendCoupleMessage = (emoji: string, text: string) => {
+    if (!isSupabaseConfigured) {
+      fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: state.couple.inviteCode,
+          slotId,
+          displayName: lang === 'es' ? 'Tu Pareja' : 'Seu Par',
+          message: { emoji, text },
+        }),
+      }).catch(() => {});
+    }
+    setState((prev) => ({
+      ...prev,
+      messages: [
+        {
+          id: `msg_${Date.now()}`,
+          senderName: lang === 'es' ? 'Tú' : 'Você',
+          emoji,
+          text,
+          createdAt: new Date().toISOString(),
+          isFromMe: true,
+        },
+        ...prev.messages,
+      ].slice(0, 30),
     }));
   };
 
@@ -437,12 +471,55 @@ export default function HomePage() {
               </button>
             )}
 
+            {/* Featured Mystery & Trust Lab Quick Access */}
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  playSoundEffect('mystery', state.soundEnabled);
+                  setRequestedGameMode('mystery');
+                  setGameLaunchKey((k) => k + 1);
+                  setActiveTab('game');
+                }}
+                className="rounded-3xl bg-gradient-to-br from-[#341242] via-[#5a1752] to-rose-600 p-4 text-left text-white shadow-lg hover:scale-[1.02] transition-transform cursor-pointer"
+              >
+                <div className="text-xl">🌙✨</div>
+                <p className="mt-1.5 font-extrabold text-sm">
+                  {lang === 'es' ? 'Modo Misterio' : 'Modo Mistério'}
+                </p>
+                <p className="text-[11px] text-rose-100 mt-0.5">
+                  {lang === 'es' ? 'Seducción sutil sin preguntas directas' : 'Sedução sutil sem perguntas diretas'}
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  playSoundEffect('insight', state.soundEnabled);
+                  setRequestedGameMode('trust_lab');
+                  setGameLaunchKey((k) => k + 1);
+                  setActiveTab('game');
+                }}
+                className="rounded-3xl bg-gradient-to-br from-indigo-600 via-purple-600 to-emerald-600 p-4 text-left text-white shadow-lg hover:scale-[1.02] transition-transform cursor-pointer"
+              >
+                <div className="text-xl">🛡️💎</div>
+                <p className="mt-1.5 font-extrabold text-sm">
+                  {lang === 'es' ? 'Test Científico de Confianza' : 'Teste Científico de Confiança'}
+                </p>
+                <p className="text-[11px] text-indigo-100 mt-0.5">
+                  {lang === 'es' ? 'Fidelidad, límites y acuerdos sanos' : 'Fidelidade, limites e acordos saudáveis'}
+                </p>
+              </button>
+            </div>
+
             {/* Quick CTAs */}
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => {
                   playSoundEffect('pop', state.soundEnabled);
+                  setRequestedGameMode('menu');
+                  setGameLaunchKey((k) => k + 1);
                   setActiveTab('game');
                 }}
                 className="rounded-3xl bg-gradient-to-r from-rose-500 to-pink-600 p-4 text-left text-white shadow-lg hover:scale-[1.02] transition-transform cursor-pointer"
@@ -474,6 +551,8 @@ export default function HomePage() {
 
         {activeTab === 'game' && (
           <QuizGame
+            key={`${requestedGameMode}-${gameLaunchKey}`}
+            initialMode={requestedGameMode}
             language={lang}
             soundEnabled={state.soundEnabled}
             onCompleteCheckin={(res) => {
@@ -498,6 +577,10 @@ export default function HomePage() {
                 myHistory: [checkin, ...prev.myHistory].slice(0, 20),
               }));
             }}
+            onCompleteTrustLab={(trustRes) =>
+              setState((prev) => ({ ...prev, latestTrustResult: trustRes }))
+            }
+            onShareTrustInvite={sendCoupleMessage}
           />
         )}
 
@@ -551,34 +634,7 @@ export default function HomePage() {
                 },
               }))
             }
-            onSendMessage={(emoji, text) => {
-              if (!isSupabaseConfigured) {
-                fetch('/api/room', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    code: state.couple.inviteCode,
-                    slotId,
-                    displayName: lang === 'es' ? 'Tu Pareja' : 'Seu Par',
-                    message: { emoji, text },
-                  }),
-                }).catch(() => {});
-              }
-              setState((prev) => ({
-                ...prev,
-                messages: [
-                  {
-                    id: `msg_${Date.now()}`,
-                    senderName: lang === 'es' ? 'Tú' : 'Você',
-                    emoji,
-                    text,
-                    createdAt: new Date().toISOString(),
-                    isFromMe: true,
-                  },
-                  ...prev.messages,
-                ].slice(0, 30),
-              }));
-            }}
+            onSendMessage={sendCoupleMessage}
           />
         )}
 
@@ -653,6 +709,10 @@ export default function HomePage() {
                 onClick={() => {
                   playSoundEffect('pop', state.soundEnabled);
                   if (item.id === 'match') setHasPartnerUpdate(false);
+                  if (item.id === 'game') {
+                    setRequestedGameMode('menu');
+                    setGameLaunchKey((k) => k + 1);
+                  }
                   setActiveTab(item.id);
                 }}
                 className={`relative flex flex-col items-center justify-center py-2.5 gap-1 text-[11px] font-bold transition-colors cursor-pointer ${

@@ -113,3 +113,59 @@ export interface RomanticIdea {
   title: Record<Language, string>;
   description: Record<Language, string>;
 }
+
+export type MysteryFacet = 'atmosphere' | 'chemistry' | 'rhythm' | 'secret_clue';
+
+export interface MysteryQuestion {
+  id: string;
+  facet: MysteryFacet;
+  prompt: Record<Language, string>;
+  options: AnswerOption[];
+}
+
+export type TrustDimension =
+  | 'walls_windows'
+  | 'investment_commitment'
+  | 'attunement_repair'
+  | 'clear_agreements';
+
+export type TrustProfileCode = 'FORTALEZA' | 'ATENCION' | 'ALERTA_CONVERSACION';
+
+export interface TrustOption {
+  id: string;
+  emoji: string;
+  label: Record<Language, string>;
+  /** 0–100 protective-habit score (higher = stronger protective trust pattern) */
+  points: number;
+}
+
+export interface TrustQuestion {
+  id: string;
+  dimension: TrustDimension;
+  frameworkRef: Record<Language, string>;
+  prompt: Record<Language, string>;
+  options: TrustOption[];
+  scientificNote: Record<Language, string>;
+}
+
+export interface TrustAnswerRecord {
+  questionId: string;
+  dimension: TrustDimension;
+  optionId: string;
+  points: number;
+}
+
+export interface TrustDimensionScore {
+  dimension: TrustDimension;
+  score: number;
+  answeredCount: number;
+}
+
+export interface TrustLabResult {
+  overallScore: number;
+  profile: TrustProfileCode;
+  dimensions: TrustDimensionScore[];
+  strongestDimension: TrustDimension;
+  focusDimension: TrustDimension;
+  completedAt: string;
+}
