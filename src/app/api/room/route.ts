@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   computePartnerPresence,
   sanitizeSharedCheckin,
+  selectMostRecentPartner,
 } from '@/lib/roomPresence';
 import { getSupabaseAdminClient } from '@/lib/supabaseAdmin';
 import type { AffectionMessage, MoodCheckin } from '@/types/liber';
@@ -81,7 +82,8 @@ export async function GET(request: NextRequest) {
       const { data: memberRows, error: membersErr } = await supabase
         .from('live_room_members')
         .select('*')
-        .eq('room_code', normalized);
+        .eq('room_code', normalized)
+        .order('last_seen_at', { ascending: false });
 
       if (!membersErr && memberRows) {
         const rows = memberRows as SupabaseRoomMemberRow[];
@@ -117,7 +119,15 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        const otherRow = rows.find((r) => r.slot_id !== mySlotId) ?? null;
+        const pickedPartner = selectMostRecentPartner(
+          rows.map((r) => ({
+            row: r,
+            slotId: r.slot_id,
+            lastSeenAtMs: Date.parse(r.last_seen_at) || 0,
+          })),
+          mySlotId
+        );
+        const otherRow = pickedPartner?.row ?? null;
 
         const { data: msgRows, error: msgErr } = await supabase
           .from('live_room_messages')
@@ -187,7 +197,15 @@ export async function GET(request: NextRequest) {
     };
   }
 
-  const otherPartner = Object.values(room.partners).find((p) => p.slotId !== mySlotId) ?? null;
+  const pickedMem = selectMostRecentPartner(
+    Object.values(room.partners).map((p) => ({
+      partner: p,
+      slotId: p.slotId,
+      lastSeenAtMs: p.lastSeenAt,
+    })),
+    mySlotId
+  );
+  const otherPartner = pickedMem?.partner ?? null;
 
   return NextResponse.json({
     ok: true,

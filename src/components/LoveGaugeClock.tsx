@@ -30,7 +30,7 @@ export function LoveGaugeClock({
 
   return (
     <div className="flex flex-col items-center justify-center py-1 select-none">
-      <div className="relative w-64 h-36">
+      <div className="relative w-full max-w-[230px] h-32">
         <svg viewBox="0 0 240 135" className="w-full h-full overflow-visible">
           <defs>
             <linearGradient id={isMystery ? 'needleMystery' : 'needleGrad'} x1="0" y1="0" x2="0" y2="1">
@@ -102,7 +102,7 @@ export function LoveGaugeClock({
       </div>
 
       {isMystery ? (
-        <div className="flex items-center justify-between w-60 text-[10px] font-extrabold uppercase tracking-wider -mt-1">
+        <div className="flex items-center justify-between w-full max-w-[220px] text-[10px] font-extrabold uppercase tracking-wider -mt-1">
           <span className="text-purple-200">Calma</span>
           <span className="text-amber-300">
             {language === 'pt-BR' ? 'Suspense' : 'Suspenso'}
@@ -112,7 +112,7 @@ export function LoveGaugeClock({
           </span>
         </div>
       ) : (
-        <div className="flex items-center justify-between w-60 text-[10px] font-extrabold uppercase tracking-wider -mt-1">
+        <div className="flex items-center justify-between w-full max-w-[220px] text-[10px] font-extrabold uppercase tracking-wider -mt-1">
           <span className="text-rose-600">Anti Liber</span>
           <span className="text-amber-600">
             {language === 'pt-BR' ? 'Quase' : 'Casi'}

@@ -14,8 +14,10 @@ import {
 import {
   canCoupleChat,
   computePartnerPresence,
+  hasRoomSnapshotChanged,
   normalizeRoomMessages,
   sanitizeSharedCheckin,
+  selectMostRecentPartner,
 } from '../roomPresence.ts';
 import {
   arePaymentsEnabled,
@@ -628,4 +630,125 @@ test('parsePaymentReturnStatus maps Mercado Pago return query params accurately'
   assert.equal(parsePaymentReturnStatus('failure')?.kind, 'failure');
   assert.equal(parsePaymentReturnStatus('unknown'), null);
   assert.equal(parsePaymentReturnStatus(null), null);
+});
+
+test('selectMostRecentPartner deterministically picks latest active partner regardless of order', () => {
+  const membersA = [
+    { slotId: 'slot_me', lastSeenAtMs: 5000, name: 'Yo' },
+    { slotId: 'slot_stale', lastSeenAtMs: 1000, name: 'Viejo' },
+    { slotId: 'slot_active', lastSeenAtMs: 4500, name: 'MiAmor' },
+  ];
+  const membersB = [membersA[1], membersA[2], membersA[0]];
+
+  const pickedA = selectMostRecentPartner(membersA, 'slot_me');
+  const pickedB = selectMostRecentPartner(membersB, 'slot_me');
+
+  assert.equal(pickedA?.slotId, 'slot_active');
+  assert.equal(pickedB?.slotId, 'slot_active');
+  assert.equal(selectMostRecentPartner([membersA[0]], 'slot_me'), null);
+});
+
+test('hasRoomSnapshotChanged suppresses identical polling snapshots and detects changes', () => {
+  const checkin: MoodCheckin = {
+    id: 'chk_1',
+    userId: 'u_b',
+    score: 82,
+    computedState: 'LIBER',
+    finalState: 'LIBER',
+    manualOverride: false,
+    boundaryLock: 'NONE',
+    shareMoodState: true,
+    shareAffectionPrefs: true,
+    shareEnergyLevel: false,
+    affectionPrefs: ['cuddles'],
+    createdAt: '2026-11-22T18:00:00Z',
+  };
+  const msg = {
+    id: 'm1',
+    senderSlotId: 'slot_b',
+    senderName: 'Amor',
+    emoji: '💖',
+    text: 'Hola',
+    createdAt: '2026-11-22T18:01:00Z',
+    isFromMe: false,
+  };
+
+  assert.equal(
+    hasRoomSnapshotChanged({
+      prevPartner: {
+        linked: true,
+        name: 'Amor',
+        avatar: '💖',
+        status: 'online',
+        chatEnabled: true,
+        checkin,
+      },
+      nextPartner: {
+        linked: true,
+        name: 'Amor',
+        avatar: '💖',
+        status: 'online',
+        chatEnabled: true,
+        checkin: { ...checkin },
+      },
+      prevMessages: [msg],
+      nextMessages: [{ ...msg }],
+    }),
+    false
+  );
+
+  assert.equal(
+    hasRoomSnapshotChanged({
+      prevPartner: {
+        linked: true,
+        name: 'Amor',
+        avatar: '💖',
+        status: 'online',
+        chatEnabled: true,
+        checkin,
+      },
+      nextPartner: {
+        linked: true,
+        name: 'Amor',
+        avatar: '💖',
+        status: 'recent',
+        chatEnabled: true,
+        checkin,
+      },
+      prevMessages: [msg],
+      nextMessages: [{ ...msg }],
+    }),
+    true
+  );
+
+  assert.equal(
+    hasRoomSnapshotChanged({
+      prevPartner: {
+        linked: true,
+        name: 'Amor',
+        avatar: '💖',
+        status: 'online',
+        chatEnabled: true,
+        checkin,
+      },
+      nextPartner: {
+        linked: true,
+        name: 'Amor',
+        avatar: '💖',
+        status: 'online',
+        chatEnabled: true,
+        checkin,
+      },
+      prevMessages: [msg],
+      nextMessages: [
+        msg,
+        {
+          ...msg,
+          id: 'm2',
+          text: 'Cómo estás?',
+        },
+      ],
+    }),
+    true
+  );
 });

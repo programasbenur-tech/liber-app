@@ -24,8 +24,10 @@ export function TrafficLight({
     <div className="flex flex-col items-center gap-4">
       <div
         className={`flex ${
-          compact ? 'flex-row gap-3 px-4 py-3' : 'flex-col gap-3.5 p-4'
-        } rounded-[2rem] bg-[#2d1635] shadow-xl border-4 border-rose-200/40`}
+          compact
+            ? 'flex-row gap-1.5 sm:gap-2.5 px-2 sm:px-3.5 py-1.5 sm:py-2 rounded-2xl border-2'
+            : 'flex-col gap-3.5 p-4 rounded-[2rem] border-4'
+        } bg-[#2d1635] shadow-xl border-rose-200/40 max-w-full`}
         role="group"
         aria-label="Semáforo del Amor"
       >
@@ -50,9 +52,9 @@ export function TrafficLight({
               onClick={() => onSelectState?.(state)}
               disabled={!onSelectState}
               title={TRAFFIC_STATE_META[state].headline[language]}
-              className={`${compact ? 'w-11 h-11 text-lg' : 'w-16 h-16 text-2xl'} rounded-full flex items-center justify-center transition-all duration-300 ${
+              className={`${compact ? 'w-7 h-7 sm:w-10 sm:h-10 text-xs sm:text-base' : 'w-16 h-16 text-2xl'} rounded-full flex items-center justify-center transition-all duration-300 ${
                 bulbColors[state]
-              } ${isActive ? 'animate-pulse-glow scale-105' : ''} ${
+              } ${isActive && !compact ? 'animate-pulse-glow scale-105' : isActive ? 'scale-105' : ''} ${
                 onSelectState ? 'cursor-pointer' : 'cursor-default'
               }`}
             >

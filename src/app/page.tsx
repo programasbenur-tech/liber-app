@@ -14,7 +14,10 @@ import {
 import { FloatingHearts } from '@/components/FloatingHearts';
 import { TrafficLight } from '@/components/TrafficLight';
 import { QuizGame } from '@/components/QuizGame';
-import { CoupleMatchDashboard } from '@/components/CoupleMatchDashboard';
+import {
+  CoupleMatchDashboard,
+  type CoupleDashboardSection,
+} from '@/components/CoupleMatchDashboard';
 import { DailyDoubleKeyCard } from '@/components/DailyDoubleKeyCard';
 import { CoupleFlameCard } from '@/components/CoupleFlameCard';
 import { ViralCardStudio } from '@/components/ViralCardStudio';
@@ -36,7 +39,11 @@ import {
   type PaymentReturnBanner,
 } from '@/lib/entitlements';
 import { computeCoupleMatch } from '@/lib/match';
-import { generateRoomCode, normalizeRoomMessages } from '@/lib/roomPresence';
+import {
+  generateRoomCode,
+  hasRoomSnapshotChanged,
+  normalizeRoomMessages,
+} from '@/lib/roomPresence';
 import { playSoundEffect } from '@/lib/sound';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import {
@@ -119,6 +126,9 @@ export default function HomePage() {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [requestedGameMode, setRequestedGameMode] = useState<'menu' | 'mystery' | 'trust_lab'>('menu');
   const [gameLaunchKey, setGameLaunchKey] = useState(0);
+  const [requestedMatchSection, setRequestedMatchSection] =
+    useState<CoupleDashboardSection>('chat');
+  const [matchLaunchKey, setMatchLaunchKey] = useState(0);
   const [state, setState] = useState<PersistedState>(createInitialState);
   const [slotId, setSlotId] = useState<string>('slot_default');
   const [roomStorage, setRoomStorage] = useState<'memory' | 'supabase'>('memory');
@@ -129,6 +139,13 @@ export default function HomePage() {
   const lastPartnerMsgIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<Tab>(activeTab);
   const soundEnabledRef = useRef<boolean>(state.soundEnabled);
+  const mySyncRef = useRef({
+    displayName: state.couple.myDisplayName ?? '',
+    avatar: state.couple.myAvatar || '💖',
+    chatEnabled: state.couple.myChatEnabled !== false,
+    checkin: state.myCheckin,
+    language: state.language,
+  });
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -137,6 +154,22 @@ export default function HomePage() {
   useEffect(() => {
     soundEnabledRef.current = state.soundEnabled;
   }, [state.soundEnabled]);
+
+  useEffect(() => {
+    mySyncRef.current = {
+      displayName: state.couple.myDisplayName ?? '',
+      avatar: state.couple.myAvatar || '💖',
+      chatEnabled: state.couple.myChatEnabled !== false,
+      checkin: state.myCheckin,
+      language: state.language,
+    };
+  }, [
+    state.couple.myDisplayName,
+    state.couple.myAvatar,
+    state.couple.myChatEnabled,
+    state.myCheckin,
+    state.language,
+  ]);
 
   useEffect(() => {
     try {
@@ -184,6 +217,11 @@ export default function HomePage() {
             isSimulatedPartner: false,
           };
           merged.messages = [];
+        } else if (!raw) {
+          merged.couple = {
+            ...merged.couple,
+            inviteCode: generateRoomCode(),
+          };
         }
         return merged;
       });
@@ -193,16 +231,14 @@ export default function HomePage() {
     setHydrated(true);
   }, []);
 
-  // Live Couple Room Sync & Presence Heartbeat (Supabase when configured, memory fallback otherwise)
+  // Debounced push when my identity, privacy, chat preference, or check-in changes
   useEffect(() => {
     if (!hydrated || !state.couple.inviteCode) return;
 
-    const myName =
-      state.couple.myDisplayName?.trim() || (state.language === 'es' ? 'Tu Pareja' : 'Seu Par');
-    const myAvatar = state.couple.myAvatar || '💖';
-    const myChatEnabled = state.couple.myChatEnabled !== false;
-
-    const pushMyState = () => {
+    const timer = setTimeout(() => {
+      const myName =
+        state.couple.myDisplayName?.trim() ||
+        (state.language === 'es' ? 'Tu Pareja' : 'Seu Par');
       fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -210,21 +246,42 @@ export default function HomePage() {
           code: state.couple.inviteCode,
           slotId,
           displayName: myName,
-          avatar: myAvatar,
-          chatEnabled: myChatEnabled,
+          avatar: state.couple.myAvatar || '💖',
+          chatEnabled: state.couple.myChatEnabled !== false,
           checkin: state.myCheckin,
         }),
       }).catch(() => {});
-    };
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [
+    hydrated,
+    slotId,
+    state.couple.inviteCode,
+    state.couple.myDisplayName,
+    state.couple.myAvatar,
+    state.couple.myChatEnabled,
+    state.myCheckin,
+    state.language,
+  ]);
+
+  // Stable Live Couple Room Sync & Presence Heartbeat (skips unchanged snapshots to avoid flicker)
+  useEffect(() => {
+    if (!hydrated || !state.couple.inviteCode) return;
 
     const pullPartnerState = async () => {
       try {
+        const snap = mySyncRef.current;
+        const myName =
+          snap.displayName.trim() ||
+          (snap.language === 'es' ? 'Tu Pareja' : 'Seu Par');
+
         const qs = new URLSearchParams({
           code: state.couple.inviteCode,
           slotId,
           name: myName,
-          avatar: myAvatar,
-          chatEnabled: String(myChatEnabled),
+          avatar: snap.avatar,
+          chatEnabled: String(snap.chatEnabled),
         });
         const res = await fetch(`/api/room?${qs.toString()}`);
         if (!res.ok) return;
@@ -243,7 +300,8 @@ export default function HomePage() {
           messages: AffectionMessage[];
         };
         if (!data.ok) return;
-        setRoomStorage(data.storage === 'supabase' ? 'supabase' : 'memory');
+        const nextStorage = data.storage === 'supabase' ? 'supabase' : 'memory';
+        setRoomStorage((prev) => (prev === nextStorage ? prev : nextStorage));
 
         const normalizedMsgs = normalizeRoomMessages(data.messages ?? [], slotId);
         const partnerMsgs = normalizedMsgs.filter((m) => !m.isFromMe);
@@ -260,6 +318,31 @@ export default function HomePage() {
 
         setState((prev) => {
           if (data.partner) {
+            const nextMsgs = normalizedMsgs;
+            const changed = hasRoomSnapshotChanged({
+              prevPartner: {
+                linked: prev.couple.partnerLinked,
+                name: prev.couple.partnerName,
+                avatar: prev.couple.partnerAvatar,
+                status: prev.couple.partnerStatus,
+                chatEnabled: prev.couple.partnerChatEnabled,
+                checkin: prev.couple.partnerLatestCheckin,
+              },
+              nextPartner: {
+                linked: true,
+                name: data.partner.displayName,
+                avatar: data.partner.avatar,
+                status: data.partner.status,
+                chatEnabled: data.partner.chatEnabled,
+                checkin: data.partner.checkin,
+              },
+              prevMessages: prev.messages,
+              nextMessages: nextMsgs,
+            });
+            if (!changed) {
+              return prev;
+            }
+
             const prevTime = prev.couple.partnerLatestCheckin?.createdAt;
             const nextTime = data.partner.checkin?.createdAt;
             if (nextTime && nextTime !== prevTime && activeTabRef.current !== 'match') {
@@ -278,11 +361,36 @@ export default function HomePage() {
                 isSimulatedPartner: false,
                 partnerLatestCheckin: data.partner.checkin,
               },
-              messages: normalizedMsgs,
+              messages: nextMsgs,
             };
           }
 
           if (prev.couple.isSimulatedPartner) {
+            return prev;
+          }
+
+          const nextMsgs = normalizedMsgs.length > 0 ? normalizedMsgs : prev.messages;
+          const changed = hasRoomSnapshotChanged({
+            prevPartner: {
+              linked: prev.couple.partnerLinked,
+              name: prev.couple.partnerName,
+              avatar: prev.couple.partnerAvatar,
+              status: prev.couple.partnerStatus,
+              chatEnabled: prev.couple.partnerChatEnabled,
+              checkin: prev.couple.partnerLatestCheckin,
+            },
+            nextPartner: {
+              linked: false,
+              name: prev.couple.partnerName,
+              avatar: prev.couple.partnerAvatar,
+              status: 'waiting',
+              chatEnabled: prev.couple.partnerChatEnabled !== false,
+              checkin: null,
+            },
+            prevMessages: prev.messages,
+            nextMessages: nextMsgs,
+          });
+          if (!changed) {
             return prev;
           }
 
@@ -295,7 +403,7 @@ export default function HomePage() {
               partnerLastSeenAt: null,
               partnerLatestCheckin: null,
             },
-            messages: normalizedMsgs.length > 0 ? normalizedMsgs : prev.messages,
+            messages: nextMsgs,
           };
         });
       } catch {
@@ -303,20 +411,10 @@ export default function HomePage() {
       }
     };
 
-    pushMyState();
     pullPartnerState();
-    const timer = setInterval(pullPartnerState, 2500);
+    const timer = setInterval(pullPartnerState, 3500);
     return () => clearInterval(timer);
-  }, [
-    hydrated,
-    state.couple.inviteCode,
-    state.couple.myDisplayName,
-    state.couple.myAvatar,
-    state.couple.myChatEnabled,
-    state.myCheckin,
-    state.language,
-    slotId,
-  ]);
+  }, [hydrated, state.couple.inviteCode, slotId]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -500,7 +598,7 @@ export default function HomePage() {
   const currentMatch = computeCoupleMatch(state.myCheckin, state.couple.partnerLatestCheckin);
 
   return (
-    <div className="relative min-h-screen pb-24">
+    <div className="relative min-h-screen pb-24 overflow-x-hidden">
       <FloatingHearts />
 
       {/* Top Header */}
@@ -553,6 +651,8 @@ export default function HomePage() {
             onClick={() => {
               playSoundEffect('pop', state.soundEnabled);
               setHasPartnerUpdate(false);
+              setRequestedMatchSection('chat');
+              setMatchLaunchKey((k) => k + 1);
               setActiveTab('match');
             }}
             className={`rounded-2xl px-3 py-1.5 text-[11px] font-extrabold border shadow-sm transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
@@ -567,7 +667,7 @@ export default function HomePage() {
           >
             {state.couple.partnerStatus === 'online' ? (
               <>
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
                 {state.couple.partnerAvatar}{' '}
                 {state.couple.partnerName || (lang === 'es' ? 'Pareja' : 'Par')}{' '}
                 {lang === 'es' ? 'en línea' : 'online'}
@@ -654,11 +754,15 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* Quick Match Preview */}
+            {/* Quick Match Preview + Direct Chat Button */}
             {currentMatch && (
               <button
                 type="button"
-                onClick={() => setActiveTab('match')}
+                onClick={() => {
+                  setRequestedMatchSection('match');
+                  setMatchLaunchKey((k) => k + 1);
+                  setActiveTab('match');
+                }}
                 className={`w-full text-left rounded-3xl bg-gradient-to-br border p-5 shadow-sm hover:shadow-md transition-shadow cursor-pointer ${currentMatch.toneClass}`}
               >
                 <div className="flex items-center justify-between">
@@ -666,7 +770,7 @@ export default function HomePage() {
                     {lang === 'es' ? 'Match de Hoy' : 'Match de Hoje'}
                   </span>
                   <span className="text-xs font-bold text-rose-700 underline">
-                    {lang === 'es' ? 'Ver pareja →' : 'Ver casal →'}
+                    {lang === 'es' ? 'Ver match →' : 'Ver match →'}
                   </span>
                 </div>
                 <p className="mt-1 text-lg font-extrabold text-rose-950">
@@ -675,6 +779,27 @@ export default function HomePage() {
                 <p className="text-xs text-rose-900/85 mt-1">{currentMatch.message[lang]}</p>
               </button>
             )}
+
+            <button
+              type="button"
+              onClick={() => {
+                playSoundEffect('pop', state.soundEnabled);
+                setHasPartnerUpdate(false);
+                setRequestedMatchSection('chat');
+                setMatchLaunchKey((k) => k + 1);
+                setActiveTab('match');
+              }}
+              className="w-full rounded-2xl bg-gradient-to-r from-rose-500 to-purple-600 py-3 px-4 text-xs sm:text-sm font-extrabold text-white shadow-md hover:opacity-95 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              💬{' '}
+              {state.couple.partnerLinked
+                ? lang === 'es'
+                  ? `Hablar con ${state.couple.partnerName || 'mi pareja'} ahora →`
+                  : `Conversar com ${state.couple.partnerName || 'meu par'} agora →`
+                : lang === 'es'
+                ? 'Conectar y chatear con mi pareja →'
+                : 'Conectar e conversar com meu par →'}
+            </button>
 
             <CoupleFlameCard
               compact
@@ -695,6 +820,8 @@ export default function HomePage() {
               myDisplayName={state.couple.myDisplayName || ''}
               onDiscussInChat={(emoji, text) => {
                 sendCoupleMessage(emoji, text);
+                setRequestedMatchSection('chat');
+                setMatchLaunchKey((k) => k + 1);
                 setActiveTab('match');
               }}
               onAnswerSubmitted={() => logFlameEvent('daily_key')}
@@ -705,6 +832,8 @@ export default function HomePage() {
                 type="button"
                 onClick={() => {
                   playSoundEffect('casi', state.soundEnabled);
+                  setRequestedMatchSection('daily');
+                  setMatchLaunchKey((k) => k + 1);
                   setActiveTab('match');
                 }}
                 className="rounded-3xl bg-gradient-to-br from-emerald-500 to-teal-600 p-4 text-left text-white shadow-md hover:scale-[1.02] transition-transform cursor-pointer"
@@ -857,6 +986,8 @@ export default function HomePage() {
 
         {activeTab === 'match' && (
           <CoupleMatchDashboard
+            key={`match-${requestedMatchSection}-${matchLaunchKey}`}
+            initialSection={requestedMatchSection}
             language={lang}
             soundEnabled={state.soundEnabled}
             myCheckin={state.myCheckin}
@@ -1059,7 +1190,7 @@ export default function HomePage() {
                 }`}
               >
                 {item.id === 'match' && hasPartnerUpdate && !isActive && (
-                  <span className="absolute top-2 right-1/3 w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+                  <span className="absolute top-2 right-1/3 w-2.5 h-2.5 rounded-full bg-rose-500" />
                 )}
                 <Icon className={`w-5 h-5 ${isActive ? 'scale-110' : ''} transition-transform`} />
                 <span>{item.label}</span>

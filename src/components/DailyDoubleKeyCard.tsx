@@ -94,7 +94,7 @@ export function DailyDoubleKeyCard({
 
   if (!dateKey) {
     return (
-      <div className="rounded-3xl bg-white/80 border border-amber-100 p-5 animate-pulse h-32" />
+      <div className="rounded-3xl bg-white/80 border border-amber-100 p-5 min-h-[120px]" />
     );
   }
 
@@ -151,7 +151,7 @@ export function DailyDoubleKeyCard({
       </h3>
 
       {status === 'waiting_for_me' && (
-        <div className="rounded-2xl bg-gradient-to-r from-rose-500 to-amber-500 px-4 py-2.5 text-xs font-extrabold text-white shadow-sm animate-pulse">
+        <div className="rounded-2xl bg-gradient-to-r from-rose-500 to-amber-500 px-4 py-2.5 text-xs font-extrabold text-white shadow-sm">
           👀{' '}
           {language === 'es'
             ? `¡${dailyState?.partnerName || 'Tu pareja'} ya respondió! Responde tú para abrir ambas llaves.`

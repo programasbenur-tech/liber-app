@@ -50,7 +50,8 @@ export async function GET(request: NextRequest) {
         .from('live_room_daily_answers')
         .select('*')
         .eq('room_code', normalized)
-        .eq('prompt_date', dateKey);
+        .eq('prompt_date', dateKey)
+        .order('created_at', { ascending: false });
 
       if (!error && data) {
         const rows = data as SupabaseDailyRow[];
@@ -149,7 +150,8 @@ export async function POST(request: NextRequest) {
             .from('live_room_daily_answers')
             .select('*')
             .eq('room_code', normalized)
-            .eq('prompt_date', dateKey);
+            .eq('prompt_date', dateKey)
+            .order('created_at', { ascending: false });
 
           if (!fetchErr && data) {
             const rows = data as SupabaseDailyRow[];
